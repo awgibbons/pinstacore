@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Instacore Control</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=0">
+    <style>
+        body { background-color: #1a1a1a; display: flex; flex-direction: column; justify-content: center; align-items: center; height: 100vh; margin: 0; font-family: sans-serif; color: white; }
+        .btn { color: white; padding: 60px 80px; font-size: 50px; font-weight: bold; border: none; border-radius: 100px; cursor: pointer; transition: all 0.1s; }
+        .btn-start { background-color: #ff2a2a; box-shadow: 0 15px 25px rgba(255, 0, 0, 0.3); }
+        .btn-start:active { transform: translateY(10px); box-shadow: 0 5px 10px rgba(255, 0, 0, 0.3); background-color: #cc0000; }
+        .btn-stop { background-color: #2aff2a; box-shadow: 0 15px 25px rgba(0, 255, 0, 0.3); color: #1a1a1a; }
+        .btn-stop:active { transform: translateY(10px); box-shadow: 0 5px 10px rgba(0, 255, 0, 0.3); background-color: #00cc00; }
+        .btn-gallery { background-color: #444; padding: 20px 40px; font-size: 24px; border-radius: 50px; margin-top: 30px; text-decoration: none; color: white; box-shadow: 0 5px 15px rgba(0,0,0,0.5); }
+        .btn-gallery:active { background-color: #333; transform: translateY(5px); }
+        .status { margin-top: 30px; font-size: 24px; color: #888; text-align: center; }
+        .error-box { background-color: #330000; color: #ff6666; padding: 20px; border-radius: 15px; border: 2px solid #ff3333; margin-bottom: 40px; font-size: 20px; max-width: 80%; white-space: pre-wrap; font-family: monospace; }
+    </style>
+    {% if is_recording %}
+    <meta http-equiv="refresh" content="5">
+    {% endif %}
+</head>
+<body>
+    {% if error_msg %}
+        <div class="error-box"><b>⚠️ SYSTEM ERROR</b><br><br>{{ error_msg }}</div>
+    {% endif %}
+
+    {% if is_recording %}
+        <form action="/stop" method="POST">
+            <button class="btn btn-stop" type="submit">STOP</button>
+        </form>
+        <div class="status">🔴 RECORDING IN PROGRESS<br><small>(Auto-stops after 60s)</small></div>
+    {% else %}
+        <form action="/start" method="POST">
+            <button class="btn btn-start" type="submit">START</button>
+        </form>
+        <div class="status">🟢 SYSTEM READY<br><small>10.1.1.1</small></div>
+        <a href="/gallery" class="btn-gallery">📂 View Recordings</a>
+    {% endif %}
+</body>
+</html>

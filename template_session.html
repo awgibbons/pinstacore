@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Session Files</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=0">
+    <style>
+        body { background-color: #1a1a1a; color: white; font-family: sans-serif; padding: 20px; margin: 0; }
+        h2 { text-align: center; color: #aaa; word-break: break-all; font-size: 18px; }
+        .file-item { display: flex; justify-content: space-between; align-items: center; background-color: #222; border: 1px solid #444; padding: 20px; margin-bottom: 15px; border-radius: 10px; }
+        .file-name { font-size: 20px; color: #ccc; }
+        .btn-download { background-color: #0088ff; color: white; text-decoration: none; padding: 15px 25px; border-radius: 8px; font-size: 18px; font-weight: bold; }
+        .btn-download:active { background-color: #0066cc; }
+        .btn-back { display: block; background-color: #444; color: white; text-align: center; padding: 20px; text-decoration: none; border-radius: 10px; font-size: 22px; margin-bottom: 20px; }
+    </style>
+</head>
+<body>
+    <a href="/gallery" class="btn-back">⬅ Back to Sessions</a>
+    <h2>{{ session_name }}</h2>
+    
+    {% if files %}
+        {% for f in files %}
+            <div class="file-item">
+                <span class="file-name">🎞️ {{ f }}</span>
+                <a href="/download/{{ session_name }}/{{ f }}" class="btn-download">Download</a>
+            </div>
+        {% endfor %}
+    {% else %}
+        <div style="text-align:center; color:#666; margin-top:30px;">This session is empty.</div>
+    {% endif %}
+</body>
+</html>
