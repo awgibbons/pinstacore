@@ -22,6 +22,7 @@ ALLOWED_DURATIONS = {seconds for seconds, _ in DURATION_OPTIONS}
 RECORDING_STATE = {
     "duration": 3600,
     "end_ts": None,
+    "pending_until": None,
 }
 
 # Ensure the sessions directory exists even if we haven't recorded yet
@@ -86,10 +87,25 @@ def format_remaining(seconds):
 
 
 def build_home_context(error_msg=None):
-    is_recording = check_recording()
+    ffmpeg_running = check_recording()
+    now = time.time()
+    pending_until = RECORDING_STATE["pending_until"]
+    pending_start = bool(
+        RECORDING_STATE["end_ts"]
+        and pending_until
+        and now < pending_until
+    )
 
-    if not is_recording:
+    is_recording = ffmpeg_running or pending_start
+
+    # If ffmpeg has started, clear startup-pending mode.
+    if ffmpeg_running:
+        RECORDING_STATE["pending_until"] = None
+
+    # If nothing is recording and startup grace has elapsed, clear stale timer state.
+    if (not ffmpeg_running) and (not pending_start):
         RECORDING_STATE["end_ts"] = None
+        RECORDING_STATE["pending_until"] = None
 
     remaining_seconds = None
     remaining_label = "--:--"
@@ -141,6 +157,8 @@ def start_recording():
                 start_new_session=True,
             )
             RECORDING_STATE["end_ts"] = time.time() + duration
+            # Allow a short window for ffmpeg to appear before first status poll.
+            RECORDING_STATE["pending_until"] = time.time() + 8
         except Exception as exc:
             return render_template('template_home.html', **build_home_context(error_msg=f"Failed to start recording: {exc}"))
     return redirect(url_for('home'))
@@ -151,6 +169,7 @@ def stop_recording():
         os.system("killall -INT ffmpeg")
         time.sleep(1)
     RECORDING_STATE["end_ts"] = None
+    RECORDING_STATE["pending_until"] = None
     return redirect(url_for('home'))
 
 # --- NEW GALLERY ROUTES ---
