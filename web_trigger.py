@@ -2,6 +2,7 @@ from flask import Flask, render_template, redirect, request, url_for, send_from_
 import subprocess
 import os
 import time
+from datetime import datetime
 
 # Resolve paths from this script location so service can run from any repo path.
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -84,6 +85,64 @@ def format_remaining(seconds):
     if hours > 0:
         return f"{hours:02d}:{minutes:02d}:{secs:02d}"
     return f"{minutes:02d}:{secs:02d}"
+
+
+def format_duration_label(seconds):
+    total = max(0, int(seconds))
+    hours, remainder = divmod(total, 3600)
+    minutes, secs = divmod(remainder, 60)
+    if hours > 0:
+        return f"{hours:02d}:{minutes:02d}:{secs:02d}"
+    return f"{minutes:02d}:{secs:02d}"
+
+
+def format_session_datetime(session_name):
+    # Expected format: session_MMDD_HHMMSS
+    if not session_name.startswith("session_"):
+        return session_name
+
+    ts_part = session_name[len("session_"):]
+    try:
+        parsed = datetime.strptime(ts_part, "%m%d_%H%M%S")
+        parsed = parsed.replace(year=datetime.now().year)
+        return parsed.strftime("%b %d, %Y at %I:%M:%S %p")
+    except ValueError:
+        return session_name
+
+
+def get_sample_video_duration_seconds(session_dir):
+    candidates = []
+    for name in os.listdir(session_dir):
+        path = os.path.join(session_dir, name)
+        if not os.path.isfile(path):
+            continue
+        ext = os.path.splitext(name)[1].lower()
+        if ext in {".mkv", ".mp4", ".mov", ".avi", ".m4v"}:
+            candidates.append(path)
+
+    if not candidates:
+        return None
+
+    sample = sorted(candidates)[0]
+    try:
+        output = subprocess.check_output(
+            [
+                "ffprobe",
+                "-v",
+                "error",
+                "-show_entries",
+                "format=duration",
+                "-of",
+                "default=noprint_wrappers=1:nokey=1",
+                sample,
+            ],
+            text=True,
+            stderr=subprocess.DEVNULL,
+            timeout=3,
+        ).strip()
+        return int(float(output))
+    except (subprocess.CalledProcessError, ValueError, subprocess.TimeoutExpired, FileNotFoundError):
+        return None
 
 
 def build_home_context(error_msg=None):
@@ -182,7 +241,21 @@ def gallery():
         folders = [f for f in os.listdir(SESSIONS_DIR) if os.path.isdir(os.path.join(SESSIONS_DIR, f))]
         # Sort descending so newest is at the top
         folders.sort(reverse=True)
-        sessions = folders
+        for folder in folders:
+            session_dir = os.path.join(SESSIONS_DIR, folder)
+            duration_seconds = get_sample_video_duration_seconds(session_dir)
+            duration_label = "Unknown"
+            if duration_seconds is not None:
+                duration_label = format_duration_label(duration_seconds)
+
+            sessions.append(
+                {
+                    "name": folder,
+                    "display_time": format_session_datetime(folder),
+                    "size": format_size(get_directory_size_bytes(session_dir)),
+                    "duration": duration_label,
+                }
+            )
     return render_template('template_gallery.html', sessions=sessions)
 
 @app.route('/gallery/<session_name>')

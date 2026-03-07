@@ -6,8 +6,10 @@
     <style>
         body { background-color: #1a1a1a; color: white; font-family: sans-serif; padding: 20px; margin: 0; }
         h1 { text-align: center; color: #aaa; }
-        .list-item { display: block; background-color: #333; color: white; padding: 25px; margin-bottom: 15px; border-radius: 10px; text-decoration: none; font-size: 22px; }
+        .list-item { display: block; background-color: #333; color: white; padding: 20px; margin-bottom: 15px; border-radius: 10px; text-decoration: none; }
         .list-item:active { background-color: #444; }
+        .item-title { font-size: 24px; color: #fff; margin-bottom: 8px; }
+        .item-meta { font-size: 17px; color: #bbb; line-height: 1.4; }
         .btn-back { display: block; background-color: #ff2a2a; color: white; text-align: center; padding: 20px; text-decoration: none; border-radius: 10px; font-size: 24px; margin-bottom: 30px; font-weight: bold;}
         .empty { text-align: center; color: #666; font-size: 20px; margin-top: 50px; }
     </style>
@@ -17,7 +19,11 @@
     <h1>Recording Sessions</h1>
     {% if sessions %}
         {% for s in sessions %}
-            <a href="/gallery/{{ s }}" class="list-item">📁 {{ s }}</a>
+            <a href="/gallery/{{ s.name }}" class="list-item">
+                <div class="item-title">{{ s.display_time }}</div>
+                <div class="item-meta">Size: {{ s.size }}</div>
+                <div class="item-meta">Length: {{ s.duration }}</div>
+            </a>
         {% endfor %}
     {% else %}
         <div class="empty">No recordings found yet.</div>
