@@ -3,6 +3,7 @@ import subprocess
 import os
 import time
 import threading
+import shutil
 from datetime import datetime
 
 # Resolve paths from this script location so service can run from any repo path.
@@ -292,6 +293,17 @@ def download_file(session_name, filename):
     if ".." not in session_name and ".." not in filename:
         return send_from_directory(target_dir, filename, as_attachment=True)
     return "Invalid request.", 400
+
+@app.route('/delete/<session_name>', methods=['POST'])
+def delete_session(session_name):
+    target_dir = os.path.join(SESSIONS_DIR, session_name)
+    # Prevent path traversal and ensure target exists
+    if ".." not in session_name and os.path.isdir(target_dir):
+        try:
+            shutil.rmtree(target_dir)
+        except Exception:
+            pass
+    return redirect(url_for('gallery'))
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=80)

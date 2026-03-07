@@ -10,6 +10,11 @@
         .list-item:active { background-color: #444; }
         .item-title { font-size: 24px; color: #fff; margin-bottom: 8px; }
         .item-meta { font-size: 17px; color: #bbb; line-height: 1.4; }
+        .item-actions { display: flex; gap: 10px; margin-top: 12px; }
+        .btn-view { background-color: #0088ff; color: white; text-decoration: none; padding: 10px 20px; border-radius: 6px; font-size: 16px; font-weight: bold; display: inline-block; }
+        .btn-view:active { background-color: #0066cc; }
+        .btn-delete-item { background-color: #cc3333; color: white; text-decoration: none; padding: 10px 20px; border-radius: 6px; font-size: 16px; font-weight: bold; border: none; cursor: pointer; display: inline-block; }
+        .btn-delete-item:active { background-color: #990000; }
         .btn-back { display: block; background-color: #ff2a2a; color: white; text-align: center; padding: 20px; text-decoration: none; border-radius: 10px; font-size: 24px; margin-bottom: 30px; font-weight: bold;}
         .empty { text-align: center; color: #666; font-size: 20px; margin-top: 50px; }
     </style>
@@ -19,11 +24,17 @@
     <h1>Recording Sessions</h1>
     {% if sessions %}
         {% for s in sessions %}
-            <a href="/gallery/{{ s.name }}" class="list-item">
+            <div class="list-item">
                 <div class="item-title">{{ s.display_time }}</div>
                 <div class="item-meta">Size: {{ s.size }}</div>
                 <div class="item-meta">Length: {{ s.duration }}</div>
-            </a>
+                <div class="item-actions">
+                    <a href="/gallery/{{ s.name }}" class="btn-view">View Files</a>
+                    <form method="POST" action="/delete/{{ s.name }}" style="margin: 0; display: inline;" onsubmit="return confirm('Delete this recording?');">
+                        <button type="submit" class="btn-delete-item">🗑️ Delete</button>
+                    </form>
+                </div>
+            </div>
         {% endfor %}
     {% else %}
         <div class="empty">No recordings found yet.</div>

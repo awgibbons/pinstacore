@@ -11,6 +11,9 @@
         .btn-download { background-color: #0088ff; color: white; text-decoration: none; padding: 15px 25px; border-radius: 8px; font-size: 18px; font-weight: bold; }
         .btn-download:active { background-color: #0066cc; }
         .btn-back { display: block; background-color: #444; color: white; text-align: center; padding: 20px; text-decoration: none; border-radius: 10px; font-size: 22px; margin-bottom: 20px; }
+        .btn-delete { background-color: #cc3333; color: white; text-decoration: none; padding: 15px 25px; border-radius: 8px; font-size: 18px; font-weight: bold; border: none; cursor: pointer; }
+        .btn-delete:active { background-color: #990000; }
+        .action-row { display: flex; gap: 15px; justify-content: center; margin-top: 30px; flex-wrap: wrap; }
     </style>
 </head>
 <body>
@@ -24,6 +27,11 @@
                 <a href="/download/{{ session_name }}/{{ f }}" class="btn-download">Download</a>
             </div>
         {% endfor %}
+        <div class="action-row">
+            <form method="POST" action="/delete/{{ session_name }}" style="margin: 0;" onsubmit="return confirm('Delete this entire session and all recordings?');">
+                <button type="submit" class="btn-delete">🗑️ Delete Session</button>
+            </form>
+        </div>
     {% else %}
         <div style="text-align:center; color:#666; margin-top:30px;">This session is empty.</div>
     {% endif %}
