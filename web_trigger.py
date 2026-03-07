@@ -2,6 +2,7 @@ from flask import Flask, render_template, redirect, request, url_for, send_from_
 import subprocess
 import os
 import time
+import threading
 from datetime import datetime
 
 # Resolve paths from this script location so service can run from any repo path.
@@ -224,9 +225,15 @@ def start_recording():
 
 @app.route('/stop', methods=['POST'])
 def stop_recording():
-    if check_recording():
+    def stop_ffmpeg_async():
         os.system("killall -INT ffmpeg")
-        time.sleep(1)
+        time.sleep(0.5)
+
+    if check_recording():
+        # Fire off stop in background thread so HTTP request returns immediately.
+        thread = threading.Thread(target=stop_ffmpeg_async, daemon=True)
+        thread.start()
+
     RECORDING_STATE["end_ts"] = None
     RECORDING_STATE["pending_until"] = None
     return redirect(url_for('home'))
