@@ -3,11 +3,12 @@ import subprocess
 import os
 import time
 
-# Configure Flask to load templates from the current directory
-app = Flask(__name__, template_folder='/home/instacore')
+# Resolve paths from this script location so service can run from any repo path.
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+app = Flask(__name__, template_folder=BASE_DIR)
 
-RECORD_SCRIPT_PATH = "/home/instacore/start_cameras.sh"
-SESSIONS_DIR = "/home/instacore/sessions"
+RECORD_SCRIPT_PATH = os.path.join(BASE_DIR, "start_cameras.sh")
+SESSIONS_DIR = os.path.expanduser("~/sessions")
 
 # Ensure the sessions directory exists even if we haven't recorded yet
 os.makedirs(SESSIONS_DIR, exist_ok=True)

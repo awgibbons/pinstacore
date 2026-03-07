@@ -18,7 +18,7 @@ if [ "${#CAMERAS[@]}" -eq 0 ]; then
     exit 1
 fi
 
-S_DIR="/home/instacore/sessions/session_$(date +%m%d_%H%M%S)"
+S_DIR="${HOME}/sessions/session_$(date +%m%d_%H%M%S)"
 mkdir -p "$S_DIR"
 echo "Recording ${#CAMERAS[@]} cameras to: $S_DIR for $DURATION seconds..."
 

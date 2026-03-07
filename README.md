@@ -7,9 +7,18 @@ Remote camera recording system for Raspberry Pi 5 with multiple USB cameras.
 SSH into your Pi and run:
 ```bash
 cd ~
-git clone https://github.com/awgibbons/pinstacore.git instacore_scripts
-cd instacore_scripts
+git clone https://github.com/awgibbons/pinstacore.git pinstacore
+cd pinstacore
 sudo bash setup_instacore.sh
+```
+
+## Updating After Changes
+
+After the first setup, updates are simple and do not require re-running setup:
+```bash
+cd ~/pinstacore
+git pull
+sudo systemctl restart instacore-web.service
 ```
 
 ## Files
@@ -18,6 +27,10 @@ sudo bash setup_instacore.sh
 - `start_cameras.sh` - Camera recording script
 - `web_trigger.py` - Flask web server
 - `template_*.html` - Web interface templates
+
+Runtime behavior:
+- The web service runs directly from the cloned repo directory.
+- Recording sessions are saved under `~/sessions`.
 
 ## Access
 

@@ -9,6 +9,11 @@ echo "========================================"
 echo " Starting Instacore System Setup..."
 echo "========================================"
 
+# Resolve repo path and the invoking user home so runtime stays repo-local.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+APP_USER="${SUDO_USER:-$(whoami)}"
+APP_HOME="$(eval echo "~${APP_USER}")"
+
 # ==========================================
 # 1. System Dependencies
 # ==========================================
@@ -61,26 +66,15 @@ else
 fi
 
 # ==========================================
-# 3. Deploy Application Files
+# 3. Prepare Local Runtime Files
 # ==========================================
-echo -e "\n>>> [3/6] Deploying application files..."
+echo -e "\n>>> [3/6] Preparing runtime files in repo directory..."
 
-# Ensure we're running from the script directory
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Ensure executable flags are set in-place so service runs directly from repo.
+chmod +x "$SCRIPT_DIR/start_cameras.sh"
+chmod +x "$SCRIPT_DIR/web_trigger.py"
 
-# Copy all application files to /home/instacore/
-cp "$SCRIPT_DIR/web_trigger.py" /home/instacore/web_trigger.py
-cp "$SCRIPT_DIR/start_cameras.sh" /home/instacore/start_cameras.sh
-cp "$SCRIPT_DIR/template_home.html" /home/instacore/template_home.html
-cp "$SCRIPT_DIR/template_gallery.html" /home/instacore/template_gallery.html
-cp "$SCRIPT_DIR/template_session.html" /home/instacore/template_session.html
-
-# Set proper permissions
-chmod +x /home/instacore/start_cameras.sh
-chmod +x /home/instacore/web_trigger.py
-chown -R instacore:instacore /home/instacore/
-
-echo "[OK] Application files deployed."
+echo "[OK] Runtime files ready at: $SCRIPT_DIR"
 
 # ==========================================
 # 4. Create Systemd Service
@@ -94,14 +88,18 @@ After=network.target
 
 [Service]
 User=root
-WorkingDirectory=/home/instacore
-ExecStart=/usr/bin/python3 /home/instacore/web_trigger.py
+Environment=HOME=__APP_HOME__
+WorkingDirectory=__SCRIPT_DIR__
+ExecStart=/usr/bin/python3 __SCRIPT_DIR__/web_trigger.py
 Restart=always
 RestartSec=5
 
 [Install]
 WantedBy=multi-user.target
 EOF
+
+sed -i "s|__SCRIPT_DIR__|$SCRIPT_DIR|g" /etc/systemd/system/instacore-web.service
+sed -i "s|__APP_HOME__|$APP_HOME|g" /etc/systemd/system/instacore-web.service
 
 systemctl daemon-reload
 systemctl enable instacore-web.service
