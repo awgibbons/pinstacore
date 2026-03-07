@@ -12,11 +12,16 @@
         .btn-stop:active { transform: translateY(10px); box-shadow: 0 5px 10px rgba(0, 255, 0, 0.3); background-color: #00cc00; }
         .btn-gallery { background-color: #444; padding: 20px 40px; font-size: 24px; border-radius: 50px; margin-top: 30px; text-decoration: none; color: white; box-shadow: 0 5px 15px rgba(0,0,0,0.5); }
         .btn-gallery:active { background-color: #333; transform: translateY(5px); }
+        .duration-wrap { margin-top: 18px; width: 320px; text-align: center; }
+        .duration-label { font-size: 18px; color: #aaa; margin-bottom: 8px; }
+        .duration-select { width: 100%; padding: 14px 16px; border-radius: 12px; border: 1px solid #555; background-color: #222; color: #fff; font-size: 20px; }
         .status { margin-top: 30px; font-size: 24px; color: #888; text-align: center; }
+        .recording-meta { margin-top: 16px; font-size: 22px; color: #bbb; text-align: center; line-height: 1.4; }
+        .timer { font-size: 40px; font-weight: bold; color: #fff; margin-top: 8px; }
         .error-box { background-color: #330000; color: #ff6666; padding: 20px; border-radius: 15px; border: 2px solid #ff3333; margin-bottom: 40px; font-size: 20px; max-width: 80%; white-space: pre-wrap; font-family: monospace; }
     </style>
     {% if is_recording %}
-    <meta http-equiv="refresh" content="5">
+    <meta http-equiv="refresh" content="3">
     {% endif %}
 </head>
 <body>
@@ -28,13 +33,54 @@
         <form action="/stop" method="POST">
             <button class="btn btn-stop" type="submit">STOP</button>
         </form>
-        <div class="status">🔴 RECORDING IN PROGRESS<br><small>(Auto-stops after 60s)</small></div>
+        <div class="status">RECORDING IN PROGRESS</div>
+        <div class="recording-meta">
+            Time remaining
+            <div id="countdown" class="timer">{{ remaining_label }}</div>
+            <div>Current session size: <b>{{ recording_size }}</b></div>
+        </div>
     {% else %}
         <form action="/start" method="POST">
+            <div class="duration-wrap">
+                <div class="duration-label">Recording length</div>
+                <select class="duration-select" name="duration">
+                    {% for seconds, label in duration_options %}
+                        <option value="{{ seconds }}" {% if seconds == selected_duration %}selected{% endif %}>{{ label }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div style="height: 18px;"></div>
             <button class="btn btn-start" type="submit">START</button>
         </form>
-        <div class="status">🟢 SYSTEM READY<br><small>10.1.1.1</small></div>
-        <a href="/gallery" class="btn-gallery">📂 View Recordings</a>
+        <div class="status">SYSTEM READY<br><small>10.1.1.1</small></div>
+        <a href="/gallery" class="btn-gallery">View Recordings</a>
+    {% endif %}
+
+    {% if is_recording and remaining_seconds is not none %}
+    <script>
+        (function () {
+            var remaining = Number("{{ remaining_seconds }}");
+            var el = document.getElementById('countdown');
+            function fmt(value) {
+                var sec = Math.max(0, value | 0);
+                var h = Math.floor(sec / 3600);
+                var m = Math.floor((sec % 3600) / 60);
+                var s = sec % 60;
+                if (h > 0) {
+                    return String(h).padStart(2, '0') + ':' + String(m).padStart(2, '0') + ':' + String(s).padStart(2, '0');
+                }
+                return String(m).padStart(2, '0') + ':' + String(s).padStart(2, '0');
+            }
+            function tick() {
+                el.textContent = fmt(remaining);
+                if (remaining > 0) {
+                    remaining -= 1;
+                }
+            }
+            tick();
+            setInterval(tick, 1000);
+        })();
+    </script>
     {% endif %}
 </body>
 </html>
