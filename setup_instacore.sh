@@ -14,6 +14,11 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 APP_USER="${SUDO_USER:-$(whoami)}"
 APP_HOME="$(eval echo "~${APP_USER}")"
 
+# If this script runs inside a cloned git repo, set local git behavior once.
+if [ -d "$SCRIPT_DIR/.git" ]; then
+    git -C "$SCRIPT_DIR" config core.fileMode false
+fi
+
 # ==========================================
 # 1. System Dependencies
 # ==========================================
@@ -69,9 +74,6 @@ fi
 # 3. Prepare Local Runtime Files
 # ==========================================
 echo -e "\n>>> [3/6] Preparing runtime files in repo directory..."
-
-# Ensure executable flags are set in-place so service runs directly from repo.
-chmod +x "$SCRIPT_DIR/start_cameras.sh"
 
 echo "[OK] Runtime files ready at: $SCRIPT_DIR"
 
