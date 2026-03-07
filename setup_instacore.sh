@@ -72,7 +72,6 @@ echo -e "\n>>> [3/6] Preparing runtime files in repo directory..."
 
 # Ensure executable flags are set in-place so service runs directly from repo.
 chmod +x "$SCRIPT_DIR/start_cameras.sh"
-chmod +x "$SCRIPT_DIR/web_trigger.py"
 
 echo "[OK] Runtime files ready at: $SCRIPT_DIR"
 
