@@ -20,9 +20,6 @@
         .timer { font-size: 40px; font-weight: bold; color: #fff; margin-top: 8px; }
         .error-box { background-color: #330000; color: #ff6666; padding: 20px; border-radius: 15px; border: 2px solid #ff3333; margin-bottom: 40px; font-size: 20px; max-width: 80%; white-space: pre-wrap; font-family: monospace; }
     </style>
-    {% if is_recording %}
-    <meta http-equiv="refresh" content="3">
-    {% endif %}
 </head>
 <body>
     {% if error_msg %}
@@ -37,7 +34,7 @@
         <div class="recording-meta">
             Time remaining
             <div id="countdown" class="timer">{{ remaining_label }}</div>
-            <div>Current session size: <b>{{ recording_size }}</b></div>
+            <div>Current session size: <b id="session-size">{{ recording_size }}</b></div>
         </div>
     {% else %}
         <form action="/start" method="POST">
@@ -60,7 +57,9 @@
     <script>
         (function () {
             var remaining = Number("{{ remaining_seconds }}");
-            var el = document.getElementById('countdown');
+            var countdownEl = document.getElementById('countdown');
+            var sizeEl = document.getElementById('session-size');
+
             function fmt(value) {
                 var sec = Math.max(0, value | 0);
                 var h = Math.floor(sec / 3600);
@@ -71,14 +70,25 @@
                 }
                 return String(m).padStart(2, '0') + ':' + String(s).padStart(2, '0');
             }
+
             function tick() {
-                el.textContent = fmt(remaining);
+                countdownEl.textContent = fmt(remaining);
                 if (remaining > 0) {
                     remaining -= 1;
                 }
             }
+
+            function updateSize() {
+                fetch('/api/session-size')
+                    .then(function(response) { return response.json(); })
+                    .then(function(data) { sizeEl.textContent = data.size; })
+                    .catch(function() { });
+            }
+
             tick();
+            updateSize();
             setInterval(tick, 1000);
+            setInterval(updateSize, 3000);
         })();
     </script>
     {% endif %}

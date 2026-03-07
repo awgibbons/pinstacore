@@ -223,6 +223,14 @@ def start_recording():
             return render_template('template_home.html', **build_home_context(error_msg=f"Failed to start recording: {exc}"))
     return redirect(url_for('home'))
 
+@app.route('/api/session-size')
+def api_session_size():
+    recording_size = "0 B"
+    latest_session = get_latest_session_dir()
+    if latest_session:
+        recording_size = format_size(get_directory_size_bytes(latest_session))
+    return {"size": recording_size}
+
 @app.route('/stop', methods=['POST'])
 def stop_recording():
     def stop_ffmpeg_async():
