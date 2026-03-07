@@ -132,18 +132,17 @@ def start_recording():
     RECORDING_STATE["duration"] = duration
 
     if not check_recording():
-        process = subprocess.Popen(["bash", RECORD_SCRIPT_PATH, str(duration)], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
-        # Quick check if script immediately fails
-        time.sleep(0.5)
-        retcode = process.poll()
-        if retcode is not None:
-            # Script exited immediately, something is wrong
-            error_output = process.stdout.read().strip() if process.stdout else "Unknown Error"
-            if not error_output:
-                error_output = "Unknown Error: Script exited silently."
-            return render_template('template_home.html', **build_home_context(error_msg=error_output))
-        RECORDING_STATE["end_ts"] = time.time() + duration
-        # Script is running, redirect immediately (auto-refresh will update status)
+        try:
+            # Fire-and-forget so the HTTP request returns immediately.
+            subprocess.Popen(
+                ["bash", RECORD_SCRIPT_PATH, str(duration)],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                start_new_session=True,
+            )
+            RECORDING_STATE["end_ts"] = time.time() + duration
+        except Exception as exc:
+            return render_template('template_home.html', **build_home_context(error_msg=f"Failed to start recording: {exc}"))
     return redirect(url_for('home'))
 
 @app.route('/stop', methods=['POST'])
