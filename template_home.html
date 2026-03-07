@@ -35,6 +35,7 @@
             Time remaining
             <div id="countdown" class="timer">{{ remaining_label }}</div>
             <div>Current session size: <b id="session-size">{{ recording_size }}</b></div>
+            <div>Free space: <b id="free-space">{{ free_space }}</b></div>
         </div>
     {% else %}
         <form action="/start" method="POST">
@@ -50,6 +51,7 @@
             <button class="btn btn-start" type="submit">START</button>
         </form>
         <div class="status">SYSTEM READY<br><small>10.1.1.1</small></div>
+        <div class="recording-meta">Free space: <b>{{ free_space }}</b></div>
         <a href="/gallery" class="btn-gallery">View Recordings</a>
     {% endif %}
 
@@ -59,6 +61,7 @@
             var remaining = Number("{{ remaining_seconds }}");
             var countdownEl = document.getElementById('countdown');
             var sizeEl = document.getElementById('session-size');
+            var freeEl = document.getElementById('free-space');
 
             function fmt(value) {
                 var sec = Math.max(0, value | 0);
@@ -81,7 +84,12 @@
             function updateSize() {
                 fetch('/api/session-size')
                     .then(function(response) { return response.json(); })
-                    .then(function(data) { sizeEl.textContent = data.size; })
+                    .then(function(data) {
+                        sizeEl.textContent = data.size;
+                        if (freeEl && data.free_space) {
+                            freeEl.textContent = data.free_space;
+                        }
+                    })
                     .catch(function() { });
             }
 

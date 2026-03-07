@@ -68,6 +68,14 @@ def get_directory_size_bytes(path):
     return total
 
 
+def get_free_space_bytes(path):
+    try:
+        _, _, free = shutil.disk_usage(path)
+        return free
+    except OSError:
+        return 0
+
+
 def format_size(num_bytes):
     value = float(num_bytes)
     units = ["B", "KB", "MB", "GB", "TB"]
@@ -179,6 +187,8 @@ def build_home_context(error_msg=None):
     if latest_session:
         recording_size = format_size(get_directory_size_bytes(latest_session))
 
+    free_space = format_size(get_free_space_bytes(SESSIONS_DIR))
+
     return {
         "is_recording": is_recording,
         "error_msg": error_msg,
@@ -187,6 +197,7 @@ def build_home_context(error_msg=None):
         "remaining_seconds": remaining_seconds,
         "remaining_label": remaining_label,
         "recording_size": recording_size,
+        "free_space": free_space,
     }
 
 # --- ROUTES ---
@@ -230,7 +241,8 @@ def api_session_size():
     latest_session = get_latest_session_dir()
     if latest_session:
         recording_size = format_size(get_directory_size_bytes(latest_session))
-    return {"size": recording_size}
+    free_space = format_size(get_free_space_bytes(SESSIONS_DIR))
+    return {"size": recording_size, "free_space": free_space}
 
 @app.route('/stop', methods=['POST'])
 def stop_recording():
