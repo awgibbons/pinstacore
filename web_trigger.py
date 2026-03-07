@@ -31,16 +31,16 @@ def home():
 def start_recording():
     if not check_recording():
         process = subprocess.Popen(["bash", RECORD_SCRIPT_PATH], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
-        for _ in range(10):
-            time.sleep(0.25)
-            retcode = process.poll()
-            if retcode is not None:
-                error_output = process.stdout.read().strip()
-                if not error_output:
-                    error_output = "Unknown Error: Script exited silently."
-                return render_template('template_home.html', is_recording=False, error_msg=error_output)
-            if check_recording():
-                return redirect(url_for('home'))
+        # Quick check if script immediately fails
+        time.sleep(0.5)
+        retcode = process.poll()
+        if retcode is not None:
+            # Script exited immediately, something is wrong
+            error_output = process.stdout.read().strip() if process.stdout else "Unknown Error"
+            if not error_output:
+                error_output = "Unknown Error: Script exited silently."
+            return render_template('template_home.html', is_recording=False, error_msg=error_output)
+        # Script is running, redirect immediately (auto-refresh will update status)
     return redirect(url_for('home'))
 
 @app.route('/stop', methods=['POST'])
