@@ -7,7 +7,7 @@ Remote camera recording system for Raspberry Pi 5 with multiple USB cameras.
 SSH into your Pi and run:
 ```bash
 cd ~
-git clone <YOUR_REPO_URL> instacore_scripts
+git clone https://github.com/awgibbons/pinstacore.git instacore_scripts
 cd instacore_scripts
 sudo bash setup_instacore.sh
 ```
