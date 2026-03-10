@@ -11,7 +11,15 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 app = Flask(__name__, template_folder=BASE_DIR)
 
 RECORD_SCRIPT_PATH = os.path.join(BASE_DIR, "start_cameras.sh")
-SESSIONS_DIR = os.path.expanduser("~/sessions")
+SESSIONS_HOME_DIR = os.path.expanduser("~/sessions")
+SESSIONS_USB_DIR = "/mnt/sd/sessions"
+
+DESTINATION_OPTIONS = [
+    {"key": "home", "label": "Home", "path": SESSIONS_HOME_DIR, "hint": "~/sessions"},
+    {"key": "usb", "label": "USB Drive", "path": SESSIONS_USB_DIR, "hint": "/mnt/sd"},
+]
+DEFAULT_DESTINATION = "home"
+DESTINATION_MAP = {item["key"]: item for item in DESTINATION_OPTIONS}
 
 DURATION_OPTIONS = [
     (60, "1 minute"),
@@ -26,10 +34,11 @@ RECORDING_STATE = {
     "duration": 3600,
     "end_ts": None,
     "pending_until": None,
+    "destination": DEFAULT_DESTINATION,
 }
 
 # Ensure the sessions directory exists even if we haven't recorded yet
-os.makedirs(SESSIONS_DIR, exist_ok=True)
+os.makedirs(SESSIONS_HOME_DIR, exist_ok=True)
 
 # --- UTILITY FUNCTIONS ---
 
@@ -41,14 +50,39 @@ def check_recording():
         return False
 
 
-def get_latest_session_dir():
-    if not os.path.isdir(SESSIONS_DIR):
+def get_destination_path(destination_key):
+    item = DESTINATION_MAP.get(destination_key)
+    if not item:
+        return None
+    return item["path"]
+
+
+def is_destination_available(destination_key):
+    path = get_destination_path(destination_key)
+    if not path:
+        return False
+
+    if destination_key == "usb":
+        return os.path.isdir("/mnt/sd") and os.access("/mnt/sd", os.W_OK)
+
+    return True
+
+
+def get_destination_label(destination_key):
+    item = DESTINATION_MAP.get(destination_key)
+    if not item:
+        return "Unknown"
+    return f"{item['label']} ({item['hint']})"
+
+
+def get_latest_session_dir(sessions_dir):
+    if not os.path.isdir(sessions_dir):
         return None
 
     candidates = [
-        os.path.join(SESSIONS_DIR, entry)
-        for entry in os.listdir(SESSIONS_DIR)
-        if os.path.isdir(os.path.join(SESSIONS_DIR, entry))
+        os.path.join(sessions_dir, entry)
+        for entry in os.listdir(sessions_dir)
+        if os.path.isdir(os.path.join(sessions_dir, entry))
     ]
     if not candidates:
         return None
@@ -182,12 +216,26 @@ def build_home_context(error_msg=None):
         remaining_seconds = max(0, int(RECORDING_STATE["end_ts"] - time.time()))
         remaining_label = format_remaining(remaining_seconds)
 
+    destination_key = RECORDING_STATE["destination"]
+    sessions_dir = get_destination_path(destination_key) or SESSIONS_HOME_DIR
+
     recording_size = "0 B"
-    latest_session = get_latest_session_dir()
+    latest_session = get_latest_session_dir(sessions_dir)
     if latest_session:
         recording_size = format_size(get_directory_size_bytes(latest_session))
 
-    free_space = format_size(get_free_space_bytes(SESSIONS_DIR))
+    free_space = format_size(get_free_space_bytes(sessions_dir))
+
+    destination_options = []
+    for item in DESTINATION_OPTIONS:
+        destination_options.append(
+            {
+                "key": item["key"],
+                "label": item["label"],
+                "hint": item["hint"],
+                "available": is_destination_available(item["key"]),
+            }
+        )
 
     return {
         "is_recording": is_recording,
@@ -198,6 +246,9 @@ def build_home_context(error_msg=None):
         "remaining_label": remaining_label,
         "recording_size": recording_size,
         "free_space": free_space,
+        "selected_destination": destination_key,
+        "recording_destination": get_destination_label(destination_key),
+        "destination_options": destination_options,
     }
 
 # --- ROUTES ---
@@ -217,13 +268,34 @@ def start_recording():
     if duration not in ALLOWED_DURATIONS:
         duration = 3600
 
+    destination_key = request.form.get("destination", DEFAULT_DESTINATION)
+    if destination_key not in DESTINATION_MAP:
+        destination_key = DEFAULT_DESTINATION
+
+    if not is_destination_available(destination_key):
+        return render_template(
+            'template_home.html',
+            **build_home_context(error_msg="USB destination is unavailable. Check that /mnt/sd is mounted and writable."),
+        )
+
+    destination_path = get_destination_path(destination_key) or SESSIONS_HOME_DIR
+
+    try:
+        os.makedirs(destination_path, exist_ok=True)
+    except OSError as exc:
+        return render_template(
+            'template_home.html',
+            **build_home_context(error_msg=f"Cannot access destination: {exc}"),
+        )
+
     RECORDING_STATE["duration"] = duration
+    RECORDING_STATE["destination"] = destination_key
 
     if not check_recording():
         try:
             # Fire-and-forget so the HTTP request returns immediately.
             subprocess.Popen(
-                ["bash", RECORD_SCRIPT_PATH, str(duration)],
+                ["bash", RECORD_SCRIPT_PATH, str(duration), destination_path],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
                 start_new_session=True,
@@ -237,12 +309,19 @@ def start_recording():
 
 @app.route('/api/session-size')
 def api_session_size():
+    destination_key = RECORDING_STATE["destination"]
+    sessions_dir = get_destination_path(destination_key) or SESSIONS_HOME_DIR
+
     recording_size = "0 B"
-    latest_session = get_latest_session_dir()
+    latest_session = get_latest_session_dir(sessions_dir)
     if latest_session:
         recording_size = format_size(get_directory_size_bytes(latest_session))
-    free_space = format_size(get_free_space_bytes(SESSIONS_DIR))
-    return {"size": recording_size, "free_space": free_space}
+    free_space = format_size(get_free_space_bytes(sessions_dir))
+    return {
+        "size": recording_size,
+        "free_space": free_space,
+        "destination": get_destination_label(destination_key),
+    }
 
 @app.route('/stop', methods=['POST'])
 def stop_recording():
@@ -265,12 +344,12 @@ def stop_recording():
 def gallery():
     # List folders in the sessions directory, sorted newest first
     sessions = []
-    if os.path.exists(SESSIONS_DIR):
-        folders = [f for f in os.listdir(SESSIONS_DIR) if os.path.isdir(os.path.join(SESSIONS_DIR, f))]
+    if os.path.exists(SESSIONS_HOME_DIR):
+        folders = [f for f in os.listdir(SESSIONS_HOME_DIR) if os.path.isdir(os.path.join(SESSIONS_HOME_DIR, f))]
         # Sort descending so newest is at the top
         folders.sort(reverse=True)
         for folder in folders:
-            session_dir = os.path.join(SESSIONS_DIR, folder)
+            session_dir = os.path.join(SESSIONS_HOME_DIR, folder)
             duration_seconds = get_sample_video_duration_seconds(session_dir)
             duration_label = "Unknown"
             if duration_seconds is not None:
@@ -288,7 +367,7 @@ def gallery():
 
 @app.route('/gallery/<session_name>')
 def session_detail(session_name):
-    target_dir = os.path.join(SESSIONS_DIR, session_name)
+    target_dir = os.path.join(SESSIONS_HOME_DIR, session_name)
     files = []
     # Ensure no path traversal tricks and that the folder exists
     if os.path.isdir(target_dir) and ".." not in session_name:
@@ -301,14 +380,14 @@ def session_detail(session_name):
 @app.route('/download/<session_name>/<filename>')
 def download_file(session_name, filename):
     # Flask's send_from_directory is specifically designed to safely serve files
-    target_dir = os.path.join(SESSIONS_DIR, session_name)
+    target_dir = os.path.join(SESSIONS_HOME_DIR, session_name)
     if ".." not in session_name and ".." not in filename:
         return send_from_directory(target_dir, filename, as_attachment=True)
     return "Invalid request.", 400
 
 @app.route('/delete/<session_name>', methods=['POST'])
 def delete_session(session_name):
-    target_dir = os.path.join(SESSIONS_DIR, session_name)
+    target_dir = os.path.join(SESSIONS_HOME_DIR, session_name)
     # Prevent path traversal and ensure target exists
     if ".." not in session_name and os.path.isdir(target_dir):
         try:

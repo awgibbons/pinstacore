@@ -15,6 +15,11 @@
         .duration-wrap { margin-top: 18px; width: 320px; text-align: center; }
         .duration-label { font-size: 18px; color: #aaa; margin-bottom: 8px; }
         .duration-select { width: 100%; padding: 14px 16px; border-radius: 12px; border: 1px solid #555; background-color: #222; color: #fff; font-size: 20px; }
+        .dest-wrap { margin-top: 16px; width: 320px; text-align: left; background-color: #202020; border: 1px solid #3a3a3a; border-radius: 12px; padding: 12px 14px; }
+        .dest-label { font-size: 17px; color: #aaa; margin-bottom: 8px; text-align: center; }
+        .dest-option { display: flex; align-items: center; gap: 10px; color: #ddd; font-size: 17px; margin: 8px 0; }
+        .dest-option input[type="radio"] { transform: scale(1.2); }
+        .dest-hint { color: #888; font-size: 14px; margin-left: 4px; }
         .status { margin-top: 30px; font-size: 24px; color: #888; text-align: center; }
         .recording-meta { margin-top: 16px; font-size: 22px; color: #bbb; text-align: center; line-height: 1.4; }
         .timer { font-size: 40px; font-weight: bold; color: #fff; margin-top: 8px; }
@@ -34,6 +39,7 @@
         <div class="recording-meta">
             Time remaining
             <div id="countdown" class="timer">{{ remaining_label }}</div>
+            <div>Destination: <b id="destination-name">{{ recording_destination }}</b></div>
             <div>Current session size: <b id="session-size">{{ recording_size }}</b></div>
             <div>Free space: <b id="free-space">{{ free_space }}</b></div>
         </div>
@@ -47,10 +53,22 @@
                     {% endfor %}
                 </select>
             </div>
+            <div class="dest-wrap">
+                <div class="dest-label">Recording destination</div>
+                {% for dest in destination_options %}
+                <label class="dest-option">
+                    <input type="radio" name="destination" value="{{ dest.key }}" {% if dest.key == selected_destination %}checked{% endif %} {% if not dest.available %}disabled{% endif %}>
+                    <span>{{ dest.label }}</span>
+                    <span class="dest-hint">{{ dest.hint }}</span>
+                    {% if not dest.available %}<span class="dest-hint">(unavailable)</span>{% endif %}
+                </label>
+                {% endfor %}
+            </div>
             <div style="height: 18px;"></div>
             <button class="btn btn-start" type="submit">START</button>
         </form>
         <div class="status">SYSTEM READY<br><small>10.1.1.1</small></div>
+        <div class="recording-meta">Destination: <b>{{ recording_destination }}</b></div>
         <div class="recording-meta">Free space: <b>{{ free_space }}</b></div>
         <a href="/gallery" class="btn-gallery">View Recordings</a>
     {% endif %}
@@ -62,6 +80,7 @@
             var countdownEl = document.getElementById('countdown');
             var sizeEl = document.getElementById('session-size');
             var freeEl = document.getElementById('free-space');
+            var destinationEl = document.getElementById('destination-name');
 
             function fmt(value) {
                 var sec = Math.max(0, value | 0);
@@ -88,6 +107,9 @@
                         sizeEl.textContent = data.size;
                         if (freeEl && data.free_space) {
                             freeEl.textContent = data.free_space;
+                        }
+                        if (destinationEl && data.destination) {
+                            destinationEl.textContent = data.destination;
                         }
                     })
                     .catch(function() { });

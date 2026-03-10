@@ -1,6 +1,7 @@
 #!/bin/bash
 
 DURATION=${1:-3600}
+DEST_BASE=${2:-"${HOME}/sessions"}
 RES="1920x1080"
 FPS=30
 CONTAINER="mkv"
@@ -18,7 +19,7 @@ if [ "${#CAMERAS[@]}" -eq 0 ]; then
     exit 1
 fi
 
-S_DIR="${HOME}/sessions/session_$(date +%m%d_%H%M%S)"
+S_DIR="${DEST_BASE}/session_$(date +%m%d_%H%M%S)"
 mkdir -p "$S_DIR"
 echo "Recording ${#CAMERAS[@]} cameras to: $S_DIR for $DURATION seconds..."
 
