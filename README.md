@@ -58,6 +58,7 @@ You can run analysis in either of these places:
 Analysis behavior:
 - Analysis runs in the background.
 - While running, the session page shows a live progress bar (files completed) and current frame count for the active file.
+- Session pages also show the expected recording length, recorder runtime, and per-file durations so truncated recordings are visible even before analysis runs.
 - You can re-run analysis later if you want fresh results.
 - Session pages show whether analysis has not run yet, is running, completed, or failed.
 - Once available, the session page provides links to `View Report`, `View JSON`, and `View Analyzer Log`.

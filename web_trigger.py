@@ -379,6 +379,76 @@ def get_sample_video_duration_seconds(session_dir):
         return None
 
 
+def get_video_duration_seconds(video_path):
+    try:
+        output = subprocess.check_output(
+            [
+                "ffprobe",
+                "-v",
+                "error",
+                "-show_entries",
+                "format=duration",
+                "-of",
+                "default=noprint_wrappers=1:nokey=1",
+                video_path,
+            ],
+            text=True,
+            stderr=subprocess.DEVNULL,
+            timeout=5,
+        ).strip()
+        return float(output)
+    except (subprocess.CalledProcessError, ValueError, subprocess.TimeoutExpired, FileNotFoundError):
+        return None
+
+
+def build_session_recording_summary(session_dir):
+    metrics = load_json_file(get_metrics_path(session_dir)) or {}
+    expected_seconds = metrics.get("requested_duration_seconds")
+    recorder_seconds = metrics.get("duration_seconds")
+
+    per_file_durations = []
+    all_files = sorted(os.listdir(session_dir)) if os.path.isdir(session_dir) else []
+    for name in all_files:
+        path = os.path.join(session_dir, name)
+        if not os.path.isfile(path):
+            continue
+        ext = os.path.splitext(name)[1].lower()
+        if ext not in {".mkv", ".mp4", ".mov", ".avi", ".m4v"}:
+            continue
+        duration_seconds = get_video_duration_seconds(path)
+        per_file_durations.append(
+            {
+                "file": name,
+                "seconds": duration_seconds,
+                "label": format_duration_label(duration_seconds) if duration_seconds is not None else "Unknown",
+            }
+        )
+
+    valid_durations = [row["seconds"] for row in per_file_durations if row["seconds"] is not None]
+    shortest_seconds = min(valid_durations) if valid_durations else None
+    longest_seconds = max(valid_durations) if valid_durations else None
+
+    duration_warning = None
+    if expected_seconds:
+        if recorder_seconds and recorder_seconds < (expected_seconds - 5):
+            duration_warning = "Recorder stopped before the requested duration."
+        elif shortest_seconds is not None and shortest_seconds < (expected_seconds * 0.95):
+            duration_warning = "One or more camera files are shorter than the requested duration."
+
+    return {
+        "expected_seconds": expected_seconds,
+        "expected_label": format_duration_label(expected_seconds) if expected_seconds else "Unknown",
+        "recorder_seconds": recorder_seconds,
+        "recorder_label": format_duration_label(recorder_seconds) if recorder_seconds else "Unknown",
+        "shortest_seconds": shortest_seconds,
+        "shortest_label": format_duration_label(shortest_seconds) if shortest_seconds is not None else "Unknown",
+        "longest_seconds": longest_seconds,
+        "longest_label": format_duration_label(longest_seconds) if longest_seconds is not None else "Unknown",
+        "duration_warning": duration_warning,
+        "per_file_durations": per_file_durations,
+    }
+
+
 def build_home_context(error_msg=None):
     ffmpeg_running = check_recording()
     now = time.time()
@@ -619,12 +689,14 @@ def session_detail(destination_key, session_name):
     files = all_files
 
     status = read_analysis_status(target_dir)
+    recording_summary = build_session_recording_summary(target_dir)
     return render_template(
         'template_session.html',
         session_name=session_name,
         destination_key=destination_key,
         destination_label=get_destination_label(destination_key),
         files=files,
+        recording_summary=recording_summary,
         analysis_state=status.get("state", "not_run"),
         analysis_error=status.get("error"),
         analysis_progress=status.get("progress"),

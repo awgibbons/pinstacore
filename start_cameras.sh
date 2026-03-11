@@ -45,16 +45,31 @@ wait
 
 # 3. Start Recording
 PIDS=()
+CAM_NAMES=()
+LOG_FILES=()
 for i in "${!CAMERAS[@]}"; do
     dev="${CAMERAS[$i]}"
     cam_name="camera_$((i+1))"
+    log_file="$S_DIR/${cam_name}.ffmpeg.log"
 
-    ffmpeg -y -hide_banner -loglevel error -thread_queue_size 4096 -f v4l2 -input_format mjpeg -s "$RES" -framerate "$FPS" -i "$dev" -t "$DURATION" -c copy "$S_DIR/${cam_name}.${CONTAINER}" &
+    ffmpeg -y -hide_banner -loglevel error -thread_queue_size 4096 -f v4l2 -input_format mjpeg -s "$RES" -framerate "$FPS" -i "$dev" -t "$DURATION" -c copy "$S_DIR/${cam_name}.${CONTAINER}" 2>"$log_file" &
     
     PIDS+=($!)
+    CAM_NAMES+=("$cam_name")
+    LOG_FILES+=("$log_file")
 done
 
-wait "${PIDS[@]}" 2>/dev/null || true
+EXIT_CODES=()
+for i in "${!PIDS[@]}"; do
+    pid="${PIDS[$i]}"
+    if wait "$pid"; then
+        EXIT_CODES+=(0)
+    else
+        code=$?
+        EXIT_CODES+=("$code")
+        echo "WARNING: ${CAM_NAMES[$i]} ffmpeg exited with code $code" >&2
+    fi
+done
 echo "Recording complete."
 
 # 4. Write post-recording metrics for later analysis runs.
@@ -74,6 +89,15 @@ for f in "$S_DIR"/*."$CONTAINER"; do
         SIZE_BYTES=$(stat -f%z "$f" 2>/dev/null || stat -c%s "$f" 2>/dev/null || echo "0")
         SIZE_MB=$(awk -v bytes="$SIZE_BYTES" 'BEGIN {printf "%.1f", bytes / 1048576}')
         FPS_ACTUAL=$(awk -v cnt="$FRAME_COUNT" -v dur="$ACTUAL_DURATION" 'BEGIN {printf "%.2f", cnt / dur}')
+        EXIT_CODE=0
+        LOG_NAME="${FILENAME%.*}.ffmpeg.log"
+        for idx in "${!CAM_NAMES[@]}"; do
+            if [ "${CAM_NAMES[$idx]}.${CONTAINER}" = "$FILENAME" ]; then
+                EXIT_CODE="${EXIT_CODES[$idx]}"
+                LOG_NAME=$(basename "${LOG_FILES[$idx]}")
+                break
+            fi
+        done
 
         if [ $FIRST -eq 0 ]; then
                 CAMERA_JSON="${CAMERA_JSON},"
@@ -86,7 +110,9 @@ for f in "$S_DIR"/*."$CONTAINER"; do
             \"file\": \"$FILENAME\",
             \"frames\": $FRAME_COUNT,
             \"size_mb\": $SIZE_MB,
-            \"fps\": $FPS_ACTUAL
+            \"fps\": $FPS_ACTUAL,
+            \"exit_code\": $EXIT_CODE,
+            \"ffmpeg_log\": \"$LOG_NAME\"
         }"
 done
 

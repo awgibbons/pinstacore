@@ -240,21 +240,35 @@ def build_clustered_events(results, cluster_window_s=0.1):
     return clusters
 
 
+def format_duration_label(seconds):
+    total = max(0, int(round(seconds or 0)))
+    hours, remainder = divmod(total, 3600)
+    minutes, secs = divmod(remainder, 60)
+    return f"{hours:02d}:{minutes:02d}:{secs:02d}"
+
+
 def write_report(report_path, session_name, analysis_data):
     with open(report_path, "w", encoding="utf-8") as handle:
         handle.write(f"# Drop-Frame Analysis: {session_name}\n\n")
         handle.write(f"Generated: {analysis_data['generated_at']}\n\n")
         handle.write("## Summary\n\n")
-        handle.write("| File | Frames | Missing | Loss % | Steady FPS | Anomalies |\n")
-        handle.write("|------|--------|---------|--------|------------|-----------|\n")
+        handle.write("| File | Recorded Duration | Frames | Missing | Session Missing | Steady FPS | Flags |\n")
+        handle.write("|------|-------------------|--------|---------|-----------------|------------|-------|\n")
 
         for row in analysis_data["per_camera"]:
+            flags = ", ".join(row.get("flags") or []) or "-"
             handle.write(
-                f"| {row['file']} | {row['actual_frames']}/{row['expected_frames']} | {row['missing_frames']} | {row['loss_pct']:.2f} | {row['steady_fps']:.2f} | {row['anomaly_count']} |\n"
+                f"| {row['file']} | {format_duration_label(row['duration_s'])}/{format_duration_label(analysis_data['session_duration_s'])} | {row['actual_frames']}/{row['expected_frames']} | {row['missing_frames']} | {row['session_missing_frames']} ({row['session_loss_pct']:.2f}%) | {row['steady_fps']:.2f} | {flags} |\n"
             )
 
         handle.write("\n")
         handle.write(f"Threshold multiplier: {analysis_data['threshold_multiplier']}x expected frame gap\n\n")
+
+        if analysis_data["recording_health_warnings"]:
+            handle.write("## Recording Health Warnings\n\n")
+            for warning in analysis_data["recording_health_warnings"]:
+                handle.write(f"- {warning}\n")
+            handle.write("\n")
 
         if analysis_data["clustered_events"]:
             handle.write("## Multi-Camera Correlated Events\n\n")
@@ -269,6 +283,7 @@ def write_report(report_path, session_name, analysis_data):
         handle.write("## Notes\n\n")
         handle.write("- An anomaly is any adjacent-frame gap > 1.5x expected frame gap.\n")
         handle.write("- Estimated dropped frames are inferred from gap length and may not be exact.\n")
+        handle.write("- Session Missing compares each file against the full intended session duration, so it can reveal cameras that stopped recording early.\n")
 
 
 def main():
@@ -308,6 +323,12 @@ def main():
 
     threshold_multiplier = 1.5
     target_fps = float(metrics.get("target_fps", 30))
+    session_duration_s = float(metrics.get("requested_duration_seconds") or metrics.get("duration_seconds") or 0)
+    camera_metrics_map = {
+        item.get("file") or item.get("device"): item
+        for item in (metrics.get("cameras") or [])
+        if isinstance(item, dict)
+    }
 
     total_files = len(video_files)
     write_status(
@@ -353,6 +374,24 @@ def main():
             threshold_multiplier=threshold_multiplier,
             progress_callback=on_progress,
         )
+        session_expected_frames = int(round(session_duration_s * result["nominal_fps"])) if session_duration_s > 0 else result["expected_frames"]
+        session_missing_frames = max(0, session_expected_frames - result["actual_frames"])
+        session_loss_pct = (100.0 * session_missing_frames / session_expected_frames) if session_expected_frames > 0 else result["loss_pct"]
+        flags = []
+        if session_duration_s > 0 and result["duration_s"] < (session_duration_s * 0.95):
+            flags.append("short_recording")
+        if session_expected_frames > 0 and session_missing_frames > result["missing_frames"] * 4:
+            flags.append("session_length_mismatch")
+
+        metric_row = camera_metrics_map.get(result["file"], {})
+        exit_code = metric_row.get("exit_code")
+        if exit_code not in (None, 0, "0"):
+            flags.append(f"ffmpeg_exit_{exit_code}")
+
+        result["session_expected_frames"] = session_expected_frames
+        result["session_missing_frames"] = session_missing_frames
+        result["session_loss_pct"] = round(session_loss_pct, 3)
+        result["flags"] = flags
         per_camera.append(result)
         write_status(
             status_path,
@@ -370,12 +409,24 @@ def main():
     totals_actual = sum(item["actual_frames"] for item in per_camera)
     totals_missing = sum(item["missing_frames"] for item in per_camera)
     total_loss_pct = (100.0 * totals_missing / totals_expected) if totals_expected > 0 else 0.0
+    recording_health_warnings = []
+    for row in per_camera:
+        if "short_recording" in row.get("flags", []):
+            recording_health_warnings.append(
+                f"{row['file']} appears truncated: recorded {format_duration_label(row['duration_s'])} of expected {format_duration_label(session_duration_s)}."
+            )
+        if any(flag.startswith("ffmpeg_exit_") for flag in row.get("flags", [])):
+            exit_flag = next(flag for flag in row["flags"] if flag.startswith("ffmpeg_exit_"))
+            recording_health_warnings.append(
+                f"{row['file']} ffmpeg exited early with {exit_flag.replace('ffmpeg_exit_', 'code ')}."
+            )
 
     analysis_data = {
         "session": session_name,
         "recording_dir": session_dir,
         "generated_at": datetime.utcnow().isoformat() + "Z",
         "threshold_multiplier": threshold_multiplier,
+        "session_duration_s": session_duration_s,
         "camera_count": len(per_camera),
         "totals": {
             "expected_frames": totals_expected,
@@ -384,6 +435,7 @@ def main():
             "loss_pct": round(total_loss_pct, 3),
         },
         "per_camera": per_camera,
+        "recording_health_warnings": recording_health_warnings,
         "clustered_events": build_clustered_events(per_camera),
     }
 
