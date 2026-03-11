@@ -14,21 +14,46 @@
         .btn-delete { background-color: #cc3333; color: white; text-decoration: none; padding: 15px 25px; border-radius: 8px; font-size: 18px; font-weight: bold; border: none; cursor: pointer; }
         .btn-delete:active { background-color: #990000; }
         .action-row { display: flex; gap: 15px; justify-content: center; margin-top: 30px; flex-wrap: wrap; }
+        .analysis-box { background-color: #202020; border: 1px solid #3a3a3a; border-radius: 10px; padding: 14px; margin-top: 14px; }
+        .analysis-title { font-size: 18px; color: #bbb; margin-bottom: 6px; }
+        .analysis-meta { font-size: 15px; color: #ddd; line-height: 1.4; }
+        .btn-action { background-color: #0a7f42; color: white; text-decoration: none; padding: 12px 20px; border-radius: 8px; font-size: 16px; font-weight: bold; border: none; cursor: pointer; }
+        .btn-action:active { background-color: #086635; }
+        .btn-view-report { background-color: #0088ff; color: white; text-decoration: none; padding: 12px 20px; border-radius: 8px; font-size: 16px; font-weight: bold; display: inline-block; }
+        .btn-view-report:active { background-color: #0066cc; }
     </style>
 </head>
 <body>
     <a href="/gallery" class="btn-back">⬅ Back to Sessions</a>
     <h2>{{ session_name }}</h2>
+    <div style="text-align:center; color:#999; margin-top:-6px; margin-bottom:12px;">Source: {{ destination_label }}</div>
+
+    <div class="analysis-box">
+        <div class="analysis-title">Drop-frame analysis</div>
+        <div class="analysis-meta">Status: {{ analysis_state }}</div>
+        {% if analysis_error %}<div class="analysis-meta">Error: {{ analysis_error }}</div>{% endif %}
+        <div class="action-row" style="margin-top:12px;">
+            <form method="POST" action="/analyze/{{ destination_key }}/{{ session_name }}" style="margin:0;">
+                <button type="submit" class="btn-action">{% if analysis_state == 'complete' %}Re-run Analysis{% else %}Run Analysis{% endif %}</button>
+            </form>
+            {% if has_report %}
+                <a href="/analysis/report/{{ destination_key }}/{{ session_name }}" class="btn-view-report">View Report</a>
+            {% endif %}
+            {% if has_analysis_json %}
+                <a href="/analysis/json/{{ destination_key }}/{{ session_name }}" class="btn-view-report">View JSON</a>
+            {% endif %}
+        </div>
+    </div>
     
     {% if files %}
         {% for f in files %}
             <div class="file-item">
                 <span class="file-name">🎞️ {{ f }}</span>
-                <a href="/download/{{ session_name }}/{{ f }}" class="btn-download">Download</a>
+                <a href="/download/{{ destination_key }}/{{ session_name }}/{{ f }}" class="btn-download">Download</a>
             </div>
         {% endfor %}
         <div class="action-row">
-            <form method="POST" action="/delete/{{ session_name }}" style="margin: 0;" onsubmit="return confirm('Delete this entire session and all recordings?');">
+            <form method="POST" action="/delete/{{ destination_key }}/{{ session_name }}" style="margin: 0;" onsubmit="return confirm('Delete this entire session and all recordings?');">
                 <button type="submit" class="btn-delete">🗑️ Delete Session</button>
             </form>
         </div>

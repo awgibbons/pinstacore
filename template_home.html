@@ -24,6 +24,14 @@
         .recording-meta { margin-top: 16px; font-size: 22px; color: #bbb; text-align: center; line-height: 1.4; }
         .timer { font-size: 40px; font-weight: bold; color: #fff; margin-top: 8px; }
         .error-box { background-color: #330000; color: #ff6666; padding: 20px; border-radius: 15px; border: 2px solid #ff3333; margin-bottom: 40px; font-size: 20px; max-width: 80%; white-space: pre-wrap; font-family: monospace; }
+        .latest-box { margin-top: 20px; width: 340px; background-color: #202020; border: 1px solid #3a3a3a; border-radius: 12px; padding: 12px; text-align: left; }
+        .latest-title { font-size: 15px; color: #aaa; margin-bottom: 8px; }
+        .latest-meta { color: #ddd; font-size: 15px; line-height: 1.4; }
+        .tiny-label { color: #bbb; font-size: 13px; }
+        .btn-mini { display: inline-block; margin-top: 8px; background-color: #444; color: #fff; text-decoration: none; padding: 8px 12px; border-radius: 8px; font-size: 14px; border: none; cursor: pointer; }
+        .btn-mini:active { background-color: #333; }
+        .btn-mini-run { background-color: #0a7f42; }
+        .btn-mini-run:active { background-color: #086635; }
     </style>
 </head>
 <body>
@@ -70,6 +78,25 @@
         <div class="status">SYSTEM READY<br><small>10.1.1.1</small></div>
         <div class="recording-meta">Destination: <b>{{ recording_destination }}</b></div>
         <div class="recording-meta">Free space: <b>{{ free_space }}</b></div>
+        {% if latest_session %}
+        <div class="latest-box">
+            <div class="latest-title">Latest session</div>
+            <div class="latest-meta">
+                {{ latest_session.display_time }}<br>
+                Size: {{ latest_session.size }}<br>
+                Analysis: {{ latest_session.analysis_state }}
+                {% if latest_session.analysis_error %}<br><span class="tiny-label">{{ latest_session.analysis_error }}</span>{% endif %}
+            </div>
+            <div class="tiny-label">Source: {{ latest_session.destination_label }}</div>
+            <a class="btn-mini" href="/gallery/{{ latest_session.destination_key }}/{{ latest_session.name }}">Open Session</a>
+            <form action="/analyze/{{ latest_session.destination_key }}/{{ latest_session.name }}" method="POST" style="display:inline;">
+                <button class="btn-mini btn-mini-run" type="submit">{% if latest_session.analysis_state == 'complete' %}Re-run Analysis{% else %}Run Analysis{% endif %}</button>
+            </form>
+            {% if latest_session.has_report %}
+            <a class="btn-mini" href="/analysis/report/{{ latest_session.destination_key }}/{{ latest_session.name }}">View Report</a>
+            {% endif %}
+        </div>
+        {% endif %}
         <a href="/gallery" class="btn-gallery">View Recordings</a>
     {% endif %}
 

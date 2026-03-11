@@ -5,10 +5,12 @@ DEST_BASE=${2:-"${HOME}/sessions"}
 RES="1920x1080"
 FPS=30
 CONTAINER="mkv"
+START_TS=$(date +%s)
 
-# 1. Detect available cameras
+# 1. Detect available cameras (up to 8 devices on even video nodes)
 CAMERAS=()
-for dev in /dev/video0 /dev/video2 /dev/video4 /dev/video6; do
+for idx in 0 2 4 6 8 10 12 14; do
+    dev="/dev/video${idx}"
     if [ -e "$dev" ]; then
         CAMERAS+=("$dev")
     fi
@@ -22,6 +24,7 @@ fi
 S_DIR="${DEST_BASE}/session_$(date +%m%d_%H%M%S)"
 mkdir -p "$S_DIR"
 echo "Recording ${#CAMERAS[@]} cameras to: $S_DIR for $DURATION seconds..."
+METRICS_FILE="$S_DIR/recording_metrics.json"
 
 # Expand the USB memory buffer
 echo 1000 | tee /sys/module/usbcore/parameters/usbfs_memory_mb > /dev/null
@@ -53,3 +56,55 @@ done
 
 wait "${PIDS[@]}" 2>/dev/null || true
 echo "Recording complete."
+
+# 4. Write post-recording metrics for later analysis runs.
+END_TS=$(date +%s)
+ACTUAL_DURATION=$((END_TS - START_TS))
+if [ "$ACTUAL_DURATION" -lt 1 ]; then
+        ACTUAL_DURATION=1
+fi
+
+CAMERA_JSON=""
+FIRST=1
+for f in "$S_DIR"/*."$CONTAINER"; do
+        [ -e "$f" ] || continue
+
+        FILENAME=$(basename "$f")
+        FRAME_COUNT=$(ffprobe -v error -show_entries packet=pts_time -of compact=p=0:nk=1 "$f" | wc -l)
+        SIZE_BYTES=$(stat -f%z "$f" 2>/dev/null || stat -c%s "$f" 2>/dev/null || echo "0")
+        SIZE_MB=$(awk -v bytes="$SIZE_BYTES" 'BEGIN {printf "%.1f", bytes / 1048576}')
+        FPS_ACTUAL=$(awk -v cnt="$FRAME_COUNT" -v dur="$ACTUAL_DURATION" 'BEGIN {printf "%.2f", cnt / dur}')
+
+        if [ $FIRST -eq 0 ]; then
+                CAMERA_JSON="${CAMERA_JSON},"
+        fi
+        FIRST=0
+
+        CAMERA_JSON="${CAMERA_JSON}
+        {
+            \"device\": \"$FILENAME\",
+            \"file\": \"$FILENAME\",
+            \"frames\": $FRAME_COUNT,
+            \"size_mb\": $SIZE_MB,
+            \"fps\": $FPS_ACTUAL
+        }"
+done
+
+cat > "$METRICS_FILE" << EOF
+{
+    "session": "$(basename "$S_DIR")",
+    "recording_dir": "$S_DIR",
+    "container": "$CONTAINER",
+    "target_resolution": "$RES",
+    "target_fps": $FPS,
+    "requested_duration_seconds": $DURATION,
+    "duration_seconds": $ACTUAL_DURATION,
+    "started_unix": $START_TS,
+    "ended_unix": $END_TS,
+    "camera_count": ${#CAMERAS[@]},
+    "cameras": [${CAMERA_JSON}
+    ]
+}
+EOF
+
+echo "Metrics saved to: $METRICS_FILE"

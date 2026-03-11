@@ -1,0 +1,12 @@
+# Enforce LF in repo so scripts stay Linux-safe.
+* text=auto
+
+# Shell scripts must always use LF on checkout/commit.
+*.sh text eol=lf
+
+# Keep source/templates LF too for consistency across Pi and Windows.
+*.py text eol=lf
+*.html text eol=lf
+*.md text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf

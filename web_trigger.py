@@ -4,6 +4,7 @@ import os
 import time
 import threading
 import shutil
+import json
 from datetime import datetime
 
 # Resolve paths from this script location so service can run from any repo path.
@@ -11,6 +12,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 app = Flask(__name__, template_folder=BASE_DIR)
 
 RECORD_SCRIPT_PATH = os.path.join(BASE_DIR, "start_cameras.sh")
+ANALYZER_SCRIPT_PATH = os.path.join(BASE_DIR, "session_analyzer.py")
 SESSIONS_HOME_DIR = os.path.expanduser("~/sessions")
 SESSIONS_USB_DIR = "/mnt/sd/sessions"
 
@@ -50,11 +52,121 @@ def check_recording():
         return False
 
 
+def get_recordable_cameras(max_cameras=8):
+    cameras = []
+    for idx in range(max_cameras):
+        node = f"/dev/video{idx * 2}"
+        if os.path.exists(node):
+            cameras.append(node)
+    return cameras
+
+
 def get_destination_path(destination_key):
     item = DESTINATION_MAP.get(destination_key)
     if not item:
         return None
     return item["path"]
+
+
+def get_status_path(session_dir):
+    return os.path.join(session_dir, "analysis_status.json")
+
+
+def get_metrics_path(session_dir):
+    return os.path.join(session_dir, "recording_metrics.json")
+
+
+def get_analysis_path(session_dir):
+    return os.path.join(session_dir, "analysis.json")
+
+
+def get_report_path(session_dir):
+    return os.path.join(session_dir, "report.md")
+
+
+def load_json_file(path):
+    try:
+        with open(path, "r", encoding="utf-8") as handle:
+            return json.load(handle)
+    except (OSError, ValueError):
+        return None
+
+
+def write_json_file(path, data):
+    with open(path, "w", encoding="utf-8") as handle:
+        json.dump(data, handle, indent=2)
+
+
+def read_analysis_status(session_dir):
+    status_path = get_status_path(session_dir)
+    status = load_json_file(status_path)
+    if status:
+        return status
+
+    if os.path.exists(get_analysis_path(session_dir)) or os.path.exists(get_report_path(session_dir)):
+        return {"state": "complete", "updated_at": int(time.time())}
+
+    return {"state": "not_run", "updated_at": None}
+
+
+def set_analysis_status(session_dir, state, error=None):
+    payload = {
+        "state": state,
+        "updated_at": int(time.time()),
+    }
+    if error:
+        payload["error"] = error
+    write_json_file(get_status_path(session_dir), payload)
+
+
+def get_session_dir(destination_key, session_name):
+    base = get_destination_path(destination_key)
+    if not base:
+        return None
+    if ".." in session_name:
+        return None
+    target = os.path.join(base, session_name)
+    if not os.path.isdir(target):
+        return None
+    return target
+
+
+def gather_sessions():
+    sessions = []
+    for item in DESTINATION_OPTIONS:
+        destination_key = item["key"]
+        base = item["path"]
+        if not os.path.isdir(base):
+            continue
+
+        for name in os.listdir(base):
+            session_dir = os.path.join(base, name)
+            if not os.path.isdir(session_dir):
+                continue
+
+            duration_seconds = get_sample_video_duration_seconds(session_dir)
+            duration_label = "Unknown"
+            if duration_seconds is not None:
+                duration_label = format_duration_label(duration_seconds)
+
+            status = read_analysis_status(session_dir)
+            sessions.append(
+                {
+                    "name": name,
+                    "destination_key": destination_key,
+                    "destination_label": item["label"],
+                    "display_time": format_session_datetime(name),
+                    "size": format_size(get_directory_size_bytes(session_dir)),
+                    "duration": duration_label,
+                    "mtime": os.path.getmtime(session_dir),
+                    "analysis_state": status.get("state", "not_run"),
+                    "analysis_error": status.get("error"),
+                    "has_report": os.path.exists(get_report_path(session_dir)),
+                }
+            )
+
+    sessions.sort(key=lambda row: row["mtime"], reverse=True)
+    return sessions
 
 
 def is_destination_available(destination_key):
@@ -237,6 +349,11 @@ def build_home_context(error_msg=None):
             }
         )
 
+    latest_session = None
+    sessions = gather_sessions()
+    if sessions:
+        latest_session = sessions[0]
+
     return {
         "is_recording": is_recording,
         "error_msg": error_msg,
@@ -249,6 +366,7 @@ def build_home_context(error_msg=None):
         "selected_destination": destination_key,
         "recording_destination": get_destination_label(destination_key),
         "destination_options": destination_options,
+        "latest_session": latest_session,
     }
 
 # --- ROUTES ---
@@ -290,6 +408,13 @@ def start_recording():
 
     RECORDING_STATE["duration"] = duration
     RECORDING_STATE["destination"] = destination_key
+
+    cameras = get_recordable_cameras(max_cameras=8)
+    if not cameras:
+        return render_template(
+            'template_home.html',
+            **build_home_context(error_msg="No cameras detected. Connect at least one camera and try again."),
+        )
 
     if not check_recording():
         try:
@@ -342,59 +467,110 @@ def stop_recording():
 
 @app.route('/gallery')
 def gallery():
-    # List folders in the sessions directory, sorted newest first
-    sessions = []
-    if os.path.exists(SESSIONS_HOME_DIR):
-        folders = [f for f in os.listdir(SESSIONS_HOME_DIR) if os.path.isdir(os.path.join(SESSIONS_HOME_DIR, f))]
-        # Sort descending so newest is at the top
-        folders.sort(reverse=True)
-        for folder in folders:
-            session_dir = os.path.join(SESSIONS_HOME_DIR, folder)
-            duration_seconds = get_sample_video_duration_seconds(session_dir)
-            duration_label = "Unknown"
-            if duration_seconds is not None:
-                duration_label = format_duration_label(duration_seconds)
-
-            sessions.append(
-                {
-                    "name": folder,
-                    "display_time": format_session_datetime(folder),
-                    "size": format_size(get_directory_size_bytes(session_dir)),
-                    "duration": duration_label,
-                }
-            )
+    sessions = gather_sessions()
     return render_template('template_gallery.html', sessions=sessions)
 
-@app.route('/gallery/<session_name>')
-def session_detail(session_name):
-    target_dir = os.path.join(SESSIONS_HOME_DIR, session_name)
-    files = []
-    # Ensure no path traversal tricks and that the folder exists
-    if os.path.isdir(target_dir) and ".." not in session_name:
-        # Get only the files, sorted alphabetically
-        all_files = [f for f in os.listdir(target_dir) if os.path.isfile(os.path.join(target_dir, f))]
-        all_files.sort()
-        files = all_files
-    return render_template('template_session.html', session_name=session_name, files=files)
+@app.route('/gallery/<destination_key>/<session_name>')
+def session_detail(destination_key, session_name):
+    target_dir = get_session_dir(destination_key, session_name)
+    if not target_dir:
+        return "Session not found.", 404
 
-@app.route('/download/<session_name>/<filename>')
-def download_file(session_name, filename):
-    # Flask's send_from_directory is specifically designed to safely serve files
-    target_dir = os.path.join(SESSIONS_HOME_DIR, session_name)
-    if ".." not in session_name and ".." not in filename:
+    files = []
+    all_files = [f for f in os.listdir(target_dir) if os.path.isfile(os.path.join(target_dir, f))]
+    all_files.sort()
+    files = all_files
+
+    status = read_analysis_status(target_dir)
+    return render_template(
+        'template_session.html',
+        session_name=session_name,
+        destination_key=destination_key,
+        destination_label=get_destination_label(destination_key),
+        files=files,
+        analysis_state=status.get("state", "not_run"),
+        analysis_error=status.get("error"),
+        has_report=os.path.exists(get_report_path(target_dir)),
+        has_analysis_json=os.path.exists(get_analysis_path(target_dir)),
+    )
+
+@app.route('/download/<destination_key>/<session_name>/<filename>')
+def download_file(destination_key, session_name, filename):
+    target_dir = get_session_dir(destination_key, session_name)
+    if target_dir and ".." not in filename:
         return send_from_directory(target_dir, filename, as_attachment=True)
     return "Invalid request.", 400
 
-@app.route('/delete/<session_name>', methods=['POST'])
-def delete_session(session_name):
-    target_dir = os.path.join(SESSIONS_HOME_DIR, session_name)
-    # Prevent path traversal and ensure target exists
-    if ".." not in session_name and os.path.isdir(target_dir):
+@app.route('/delete/<destination_key>/<session_name>', methods=['POST'])
+def delete_session(destination_key, session_name):
+    target_dir = get_session_dir(destination_key, session_name)
+    if target_dir:
         try:
             shutil.rmtree(target_dir)
         except Exception:
             pass
     return redirect(url_for('gallery'))
+
+
+def analyze_session_async(session_dir):
+    metrics_path = get_metrics_path(session_dir)
+    if not os.path.exists(metrics_path):
+        set_analysis_status(session_dir, "failed", error="recording_metrics.json not found")
+        return
+
+    set_analysis_status(session_dir, "running")
+    try:
+        proc = subprocess.run(
+            ["python3", ANALYZER_SCRIPT_PATH, metrics_path],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=600,
+        )
+    except Exception as exc:
+        set_analysis_status(session_dir, "failed", error=str(exc))
+        return
+
+    if proc.returncode == 0:
+        set_analysis_status(session_dir, "complete")
+    else:
+        error = (proc.stderr or proc.stdout or "Analyzer failed").strip()
+        set_analysis_status(session_dir, "failed", error=error[:400])
+
+
+@app.route('/analyze/<destination_key>/<session_name>', methods=['POST'])
+def run_analysis(destination_key, session_name):
+    session_dir = get_session_dir(destination_key, session_name)
+    if not session_dir:
+        return "Session not found.", 404
+
+    thread = threading.Thread(target=analyze_session_async, args=(session_dir,), daemon=True)
+    thread.start()
+    return redirect(url_for('session_detail', destination_key=destination_key, session_name=session_name))
+
+
+@app.route('/analysis/report/<destination_key>/<session_name>')
+def view_analysis_report(destination_key, session_name):
+    session_dir = get_session_dir(destination_key, session_name)
+    if not session_dir:
+        return "Session not found.", 404
+
+    report_file = get_report_path(session_dir)
+    if not os.path.exists(report_file):
+        return "Analysis report not found.", 404
+    return send_from_directory(session_dir, os.path.basename(report_file), as_attachment=False)
+
+
+@app.route('/analysis/json/<destination_key>/<session_name>')
+def view_analysis_json(destination_key, session_name):
+    session_dir = get_session_dir(destination_key, session_name)
+    if not session_dir:
+        return "Session not found.", 404
+
+    analysis_file = get_analysis_path(session_dir)
+    if not os.path.exists(analysis_file):
+        return "Analysis data not found.", 404
+    return send_from_directory(session_dir, os.path.basename(analysis_file), as_attachment=False)
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=80)
