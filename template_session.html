@@ -117,10 +117,15 @@
                 var completedFiles = Number(progress && progress.completed_files || 0);
                 var currentFile = progress && progress.current_file;
                 var framesProcessed = Number(progress && progress.current_file_frames_processed || 0);
+                var estimatedFrames = Number(progress && progress.current_file_estimated_frames || 0);
 
                 var pct = 0;
                 if (totalFiles > 0) {
-                    pct = Math.max(0, Math.min(100, (completedFiles / totalFiles) * 100));
+                    var fractional = 0;
+                    if (estimatedFrames > 0) {
+                        fractional = Math.max(0, Math.min(1, framesProcessed / estimatedFrames));
+                    }
+                    pct = Math.max(0, Math.min(100, ((completedFiles + fractional) / totalFiles) * 100));
                 }
                 progressFillEl.style.width = pct.toFixed(1) + '%';
 
@@ -135,7 +140,11 @@
                     text += ' | Current: ' + currentFile;
                 }
                 if (framesProcessed > 0) {
-                    text += ' | Frames processed: ' + framesProcessed.toLocaleString();
+                    if (estimatedFrames > 0) {
+                        text += ' | Frames: ' + framesProcessed.toLocaleString() + '/' + estimatedFrames.toLocaleString();
+                    } else {
+                        text += ' | Frames processed: ' + framesProcessed.toLocaleString();
+                    }
                 }
 
                 progressTextEl.textContent = text;

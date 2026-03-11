@@ -88,18 +88,29 @@ def get_video_duration(video_file):
     return float(result.stdout.strip())
 
 
-def get_frame_timestamps(video_file, progress_callback=None, progress_every=5000):
-    result = run_ffprobe(
-        [
-            "-show_entries",
-            "packet=pts_time",
-            "-of",
-            "compact=p=0:nk=1",
-            video_file,
-        ]
+def get_frame_timestamps(video_file, progress_callback=None, progress_every=2500):
+    cmd = [
+        "ffprobe",
+        "-v",
+        "error",
+        "-show_entries",
+        "packet=pts_time",
+        "-of",
+        "compact=p=0:nk=1",
+        video_file,
+    ]
+
+    proc = subprocess.Popen(
+        cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        bufsize=1,
     )
+
     timestamps = []
-    for raw in result.stdout.splitlines():
+    assert proc.stdout is not None
+    for raw in proc.stdout:
         raw = raw.strip()
         if not raw:
             continue
@@ -109,6 +120,14 @@ def get_frame_timestamps(video_file, progress_callback=None, progress_every=5000
                 progress_callback(len(timestamps))
         except ValueError:
             pass
+
+    stderr_text = ""
+    if proc.stderr is not None:
+        stderr_text = proc.stderr.read()
+    returncode = proc.wait()
+    if returncode != 0:
+        raise subprocess.CalledProcessError(returncode, cmd, output="", stderr=stderr_text)
+
     if progress_callback:
         progress_callback(len(timestamps))
     return timestamps
@@ -305,6 +324,15 @@ def main():
     per_camera = []
     for idx, video_file in enumerate(video_files):
         current_file = os.path.basename(video_file)
+        try:
+            nominal_fps = get_nominal_fps(video_file)
+        except Exception:
+            nominal_fps = float(target_fps)
+        try:
+            duration_s = get_video_duration(video_file)
+        except Exception:
+            duration_s = 0.0
+        estimated_frames = int(round(duration_s * nominal_fps)) if duration_s > 0 else 0
 
         def on_progress(frame_count):
             write_status(
@@ -315,6 +343,7 @@ def main():
                     "completed_files": idx,
                     "current_file": current_file,
                     "current_file_frames_processed": frame_count,
+                    "current_file_estimated_frames": estimated_frames,
                 },
             )
 
@@ -333,6 +362,7 @@ def main():
                 "completed_files": idx + 1,
                 "current_file": current_file,
                 "current_file_frames_processed": result["actual_frames"],
+                "current_file_estimated_frames": result["expected_frames"],
             },
         )
 
