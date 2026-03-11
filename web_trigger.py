@@ -68,6 +68,19 @@ def get_destination_path(destination_key):
     return item["path"]
 
 
+def get_destination_usage_path(destination_key):
+    path = get_destination_path(destination_key)
+    if not path:
+        return None
+
+    if destination_key == "usb":
+        if os.path.ismount("/mnt/sd") or os.path.isdir("/mnt/sd"):
+            return "/mnt/sd"
+        return path
+
+    return os.path.expanduser("~")
+
+
 def get_status_path(session_dir):
     return os.path.join(session_dir, "analysis_status.json")
 
@@ -252,6 +265,13 @@ def get_free_space_bytes(path):
         return 0
 
 
+def get_destination_free_space_bytes(destination_key):
+    usage_path = get_destination_usage_path(destination_key)
+    if not usage_path:
+        return 0
+    return get_free_space_bytes(usage_path)
+
+
 def format_size(num_bytes):
     value = float(num_bytes)
     units = ["B", "KB", "MB", "GB", "TB"]
@@ -366,7 +386,7 @@ def build_home_context(error_msg=None):
     if latest_session:
         recording_size = format_size(get_directory_size_bytes(latest_session))
 
-    free_space = format_size(get_free_space_bytes(sessions_dir))
+    free_space = format_size(get_destination_free_space_bytes(destination_key))
 
     destination_options = []
     for item in DESTINATION_OPTIONS:
@@ -470,11 +490,24 @@ def api_session_size():
     latest_session = get_latest_session_dir(sessions_dir)
     if latest_session:
         recording_size = format_size(get_directory_size_bytes(latest_session))
-    free_space = format_size(get_free_space_bytes(sessions_dir))
+    free_space = format_size(get_destination_free_space_bytes(destination_key))
     return {
         "size": recording_size,
         "free_space": free_space,
         "destination": get_destination_label(destination_key),
+    }
+
+
+@app.route('/api/destination-info')
+def api_destination_info():
+    destination_key = request.args.get("destination", DEFAULT_DESTINATION)
+    if destination_key not in DESTINATION_MAP:
+        destination_key = DEFAULT_DESTINATION
+
+    return {
+        "destination": get_destination_label(destination_key),
+        "free_space": format_size(get_destination_free_space_bytes(destination_key)),
+        "available": is_destination_available(destination_key),
     }
 
 @app.route('/stop', methods=['POST'])
@@ -576,6 +609,23 @@ def run_analysis(destination_key, session_name):
     thread = threading.Thread(target=analyze_session_async, args=(session_dir,), daemon=True)
     thread.start()
     return redirect(url_for('session_detail', destination_key=destination_key, session_name=session_name))
+
+
+@app.route('/api/analysis-status/<destination_key>/<session_name>')
+def api_analysis_status(destination_key, session_name):
+    session_dir = get_session_dir(destination_key, session_name)
+    if not session_dir:
+        return {"error": "Session not found"}, 404
+
+    status = read_analysis_status(session_dir)
+    return {
+        "state": status.get("state", "not_run"),
+        "error": status.get("error"),
+        "has_report": os.path.exists(get_report_path(session_dir)),
+        "has_analysis_json": os.path.exists(get_analysis_path(session_dir)),
+        "report_url": url_for('view_analysis_report', destination_key=destination_key, session_name=session_name),
+        "json_url": url_for('view_analysis_json', destination_key=destination_key, session_name=session_name),
+    }
 
 
 @app.route('/analysis/report/<destination_key>/<session_name>')

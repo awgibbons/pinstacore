@@ -17,6 +17,7 @@
         .analysis-box { background-color: #202020; border: 1px solid #3a3a3a; border-radius: 10px; padding: 14px; margin-top: 14px; }
         .analysis-title { font-size: 18px; color: #bbb; margin-bottom: 6px; }
         .analysis-meta { font-size: 15px; color: #ddd; line-height: 1.4; }
+        .hidden { display: none !important; }
         .btn-action { background-color: #0a7f42; color: white; text-decoration: none; padding: 12px 20px; border-radius: 8px; font-size: 16px; font-weight: bold; border: none; cursor: pointer; }
         .btn-action:active { background-color: #086635; }
         .btn-view-report { background-color: #0088ff; color: white; text-decoration: none; padding: 12px 20px; border-radius: 8px; font-size: 16px; font-weight: bold; display: inline-block; }
@@ -30,18 +31,14 @@
 
     <div class="analysis-box">
         <div class="analysis-title">Drop-frame analysis</div>
-        <div class="analysis-meta">Status: {{ analysis_state }}</div>
-        {% if analysis_error %}<div class="analysis-meta">Error: {{ analysis_error }}</div>{% endif %}
+        <div class="analysis-meta">Status: <span id="analysis-state">{{ analysis_state }}</span></div>
+        <div class="analysis-meta {% if not analysis_error %}hidden{% endif %}" id="analysis-error-row">Error: <span id="analysis-error">{{ analysis_error or '' }}</span></div>
         <div class="action-row" style="margin-top:12px;">
             <form method="POST" action="/analyze/{{ destination_key }}/{{ session_name }}" style="margin:0;">
-                <button type="submit" class="btn-action">{% if analysis_state == 'complete' %}Re-run Analysis{% else %}Run Analysis{% endif %}</button>
+                <button type="submit" class="btn-action" id="analysis-button">{% if analysis_state == 'complete' %}Re-run Analysis{% else %}Run Analysis{% endif %}</button>
             </form>
-            {% if has_report %}
-                <a href="/analysis/report/{{ destination_key }}/{{ session_name }}" class="btn-view-report">View Report</a>
-            {% endif %}
-            {% if has_analysis_json %}
-                <a href="/analysis/json/{{ destination_key }}/{{ session_name }}" class="btn-view-report">View JSON</a>
-            {% endif %}
+            <a href="/analysis/report/{{ destination_key }}/{{ session_name }}" class="btn-view-report {% if not has_report %}hidden{% endif %}" id="report-link">View Report</a>
+            <a href="/analysis/json/{{ destination_key }}/{{ session_name }}" class="btn-view-report {% if not has_analysis_json %}hidden{% endif %}" id="json-link">View JSON</a>
         </div>
     </div>
     
@@ -59,6 +56,75 @@
         </div>
     {% else %}
         <div style="text-align:center; color:#666; margin-top:30px;">This session is empty.</div>
+    {% endif %}
+
+    {% if analysis_state == 'running' %}
+    <script>
+        (function () {
+            var stateEl = document.getElementById('analysis-state');
+            var errorRowEl = document.getElementById('analysis-error-row');
+            var errorEl = document.getElementById('analysis-error');
+            var buttonEl = document.getElementById('analysis-button');
+            var reportLinkEl = document.getElementById('report-link');
+            var jsonLinkEl = document.getElementById('json-link');
+
+            function setHidden(element, hidden) {
+                if (!element) {
+                    return;
+                }
+                if (hidden) {
+                    element.classList.add('hidden');
+                } else {
+                    element.classList.remove('hidden');
+                }
+            }
+
+            function updateStatus() {
+                fetch('/api/analysis-status/{{ destination_key }}/{{ session_name }}')
+                    .then(function(response) { return response.json(); })
+                    .then(function(data) {
+                        if (data.error && !data.state) {
+                            return;
+                        }
+
+                        if (stateEl && data.state) {
+                            stateEl.textContent = data.state;
+                        }
+
+                        if (buttonEl) {
+                            buttonEl.textContent = data.state === 'complete' ? 'Re-run Analysis' : 'Run Analysis';
+                        }
+
+                        if (data.error) {
+                            if (errorEl) {
+                                errorEl.textContent = data.error;
+                            }
+                            setHidden(errorRowEl, false);
+                        } else {
+                            setHidden(errorRowEl, true);
+                        }
+
+                        if (reportLinkEl && data.report_url) {
+                            reportLinkEl.href = data.report_url;
+                        }
+                        if (jsonLinkEl && data.json_url) {
+                            jsonLinkEl.href = data.json_url;
+                        }
+
+                        setHidden(reportLinkEl, !data.has_report);
+                        setHidden(jsonLinkEl, !data.has_analysis_json);
+
+                        if (data.state === 'complete' || data.state === 'failed' || data.state === 'not_run') {
+                            clearInterval(intervalId);
+                        }
+                    })
+                    .catch(function() { });
+            }
+
+            var intervalId = setInterval(updateStatus, 2000);
+            updateStatus();
+        })();
+    </script>
     {% endif %}
 </body>
 </html>

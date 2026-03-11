@@ -76,8 +76,8 @@
             <button class="btn btn-start" type="submit">START</button>
         </form>
         <div class="status">SYSTEM READY<br><small>10.1.1.1</small></div>
-        <div class="recording-meta">Destination: <b>{{ recording_destination }}</b></div>
-        <div class="recording-meta">Free space: <b>{{ free_space }}</b></div>
+        <div class="recording-meta">Destination: <b id="idle-destination-name">{{ recording_destination }}</b></div>
+        <div class="recording-meta">Free space: <b id="idle-free-space">{{ free_space }}</b></div>
         {% if latest_session %}
         <div class="latest-box">
             <div class="latest-title">Latest session</div>
@@ -146,6 +146,46 @@
             updateSize();
             setInterval(tick, 1000);
             setInterval(updateSize, 3000);
+        })();
+    </script>
+    {% endif %}
+
+    {% if not is_recording %}
+    <script>
+        (function () {
+            var destinationInputs = document.querySelectorAll('input[name="destination"]');
+            var freeEl = document.getElementById('idle-free-space');
+            var destinationEl = document.getElementById('idle-destination-name');
+
+            function getSelectedDestination() {
+                for (var index = 0; index < destinationInputs.length; index += 1) {
+                    if (destinationInputs[index].checked) {
+                        return destinationInputs[index].value;
+                    }
+                }
+                return 'home';
+            }
+
+            function updateDestinationInfo() {
+                var selected = getSelectedDestination();
+                fetch('/api/destination-info?destination=' + encodeURIComponent(selected))
+                    .then(function(response) { return response.json(); })
+                    .then(function(data) {
+                        if (destinationEl && data.destination) {
+                            destinationEl.textContent = data.destination;
+                        }
+                        if (freeEl && data.free_space) {
+                            freeEl.textContent = data.free_space;
+                        }
+                    })
+                    .catch(function() { });
+            }
+
+            for (var index = 0; index < destinationInputs.length; index += 1) {
+                destinationInputs[index].addEventListener('change', updateDestinationInfo);
+            }
+
+            updateDestinationInfo();
         })();
     </script>
     {% endif %}
