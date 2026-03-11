@@ -17,6 +17,7 @@ APP_HOME="$(eval echo "~${APP_USER}")"
 # If this script runs inside a cloned git repo, set local git behavior once.
 if [ -d "$SCRIPT_DIR/.git" ]; then
     git -C "$SCRIPT_DIR" config core.fileMode false
+    git config --global --add safe.directory "$SCRIPT_DIR"
 fi
 
 # ==========================================

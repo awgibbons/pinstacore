@@ -39,6 +39,9 @@ write_status "running" "Starting software update..."
 
 cd "$REPO_DIR" || fail_update "Could not access repo directory."
 
+echo "Configuring Git safe.directory for updater..." >> "$LOG_FILE"
+git config --global --add safe.directory "$REPO_DIR" >> "$LOG_FILE" 2>&1 || fail_update "Failed to configure git safe.directory."
+
 echo "Fetching latest changes..." >> "$LOG_FILE"
 git fetch --prune >> "$LOG_FILE" 2>&1 || fail_update "git fetch failed."
 

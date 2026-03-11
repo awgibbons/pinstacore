@@ -76,6 +76,7 @@ What it does:
 Notes:
 - Updates are blocked while a recording is in progress.
 - If the repo has unexpected local changes on the Pi, the update can fail just like a normal `git pull --ff-only` would.
+- The setup script and updater mark the repo as a Git `safe.directory` so the root-run web service can update a repo owned by your normal user.
 - The status box on the home page shows the latest result and any recent command output.
 
 ## Session Output
