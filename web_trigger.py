@@ -13,6 +13,8 @@ app = Flask(__name__, template_folder=BASE_DIR)
 
 RECORD_SCRIPT_PATH = os.path.join(BASE_DIR, "start_cameras.sh")
 ANALYZER_SCRIPT_PATH = os.path.join(BASE_DIR, "session_analyzer.py")
+UPDATE_SCRIPT_PATH = os.path.join(BASE_DIR, "update_instacore.sh")
+UPDATE_STATUS_PATH = os.path.join(BASE_DIR, "update_status.json")
 SESSIONS_HOME_DIR = os.path.expanduser("~/sessions")
 SESSIONS_USB_DIR = "/mnt/sd/sessions"
 
@@ -108,6 +110,25 @@ def load_json_file(path):
 def write_json_file(path, data):
     with open(path, "w", encoding="utf-8") as handle:
         json.dump(data, handle, indent=2)
+
+
+def read_update_status():
+    status = load_json_file(UPDATE_STATUS_PATH)
+    if status:
+        return status
+    return {"state": "idle", "message": "No update run yet.", "updated_at": None, "details": ""}
+
+
+def set_update_status(state, message, details=""):
+    write_json_file(
+        UPDATE_STATUS_PATH,
+        {
+            "state": state,
+            "message": message,
+            "updated_at": int(time.time()),
+            "details": details,
+        },
+    )
 
 
 def read_analysis_status(session_dir):
@@ -403,6 +424,8 @@ def build_home_context(error_msg=None):
     if not is_recording:
         latest_session = get_latest_session_summary()
 
+    update_status = read_update_status()
+
     return {
         "is_recording": is_recording,
         "error_msg": error_msg,
@@ -416,6 +439,7 @@ def build_home_context(error_msg=None):
         "recording_destination": get_destination_label(destination_key),
         "destination_options": destination_options,
         "latest_session": latest_session,
+        "update_status": update_status,
     }
 
 # --- ROUTES ---
@@ -509,6 +533,50 @@ def api_destination_info():
         "free_space": format_size(get_destination_free_space_bytes(destination_key)),
         "available": is_destination_available(destination_key),
     }
+
+
+@app.route('/api/update-status')
+def api_update_status():
+    return read_update_status()
+
+
+@app.route('/update-software', methods=['POST'])
+def update_software():
+    ffmpeg_running = check_recording()
+    pending_until = RECORDING_STATE["pending_until"]
+    pending_start = bool(RECORDING_STATE["end_ts"] and pending_until and time.time() < pending_until)
+    if ffmpeg_running or pending_start:
+        return render_template(
+            'template_home.html',
+            **build_home_context(error_msg="Cannot update software while a recording is in progress."),
+        )
+
+    status = read_update_status()
+    if status.get("state") in {"running", "restarting"}:
+        return redirect(url_for('home'))
+
+    if not os.path.exists(UPDATE_SCRIPT_PATH):
+        return render_template(
+            'template_home.html',
+            **build_home_context(error_msg="Update script not found on device."),
+        )
+
+    set_update_status("running", "Starting software update...")
+    try:
+        subprocess.Popen(
+            ["bash", UPDATE_SCRIPT_PATH],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+    except Exception as exc:
+        set_update_status("failed", f"Failed to start update: {exc}")
+        return render_template(
+            'template_home.html',
+            **build_home_context(error_msg=f"Failed to start update: {exc}"),
+        )
+
+    return redirect(url_for('home'))
 
 @app.route('/stop', methods=['POST'])
 def stop_recording():

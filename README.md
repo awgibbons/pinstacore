@@ -29,6 +29,7 @@ After reboot, connect to WiFi:
 - Shows one combined gallery in the web UI with a small source label (`Home` or `USB`).
 - Stores per-session recording metadata in `recording_metrics.json`.
 - Lets you manually run or re-run dropped-frame analysis after a session finishes.
+- Lets you trigger a `git pull --ff-only` and web-service restart from the home page.
 - Generates:
 	- `report.md` for readable results
 	- `analysis.json` for structured results
@@ -62,6 +63,20 @@ Analysis behavior:
 
 Drop detection rule:
 - A dropped-frame anomaly is flagged when the gap between adjacent frame timestamps is greater than `1.5x` the expected frame interval.
+
+## Updating From The Web UI
+
+The home page includes an `Update Software` button.
+
+What it does:
+- Runs `git fetch` and `git pull --ff-only` in the repo on the Pi.
+- Restarts `instacore-web.service` after the pull finishes.
+- Shows update status on the home page without requiring SSH.
+
+Notes:
+- Updates are blocked while a recording is in progress.
+- If the repo has unexpected local changes on the Pi, the update can fail just like a normal `git pull --ff-only` would.
+- The status box on the home page shows the latest result and any recent command output.
 
 ## Session Output
 

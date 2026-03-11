@@ -32,6 +32,11 @@
         .btn-mini:active { background-color: #333; }
         .btn-mini-run { background-color: #0a7f42; }
         .btn-mini-run:active { background-color: #086635; }
+        .update-box { margin-top: 20px; width: 340px; background-color: #202020; border: 1px solid #3a3a3a; border-radius: 12px; padding: 12px; text-align: left; }
+        .update-title { font-size: 15px; color: #aaa; margin-bottom: 8px; }
+        .update-meta { color: #ddd; font-size: 15px; line-height: 1.4; white-space: pre-wrap; }
+        .btn-update { display: inline-block; margin-top: 10px; background-color: #7a4d00; color: #fff; text-decoration: none; padding: 10px 14px; border-radius: 8px; font-size: 14px; border: none; cursor: pointer; }
+        .btn-update:active { background-color: #5d3a00; }
     </style>
 </head>
 <body>
@@ -97,6 +102,16 @@
             {% endif %}
         </div>
         {% endif %}
+        <div class="update-box">
+            <div class="update-title">Software update</div>
+            <div class="update-meta">Status: <span id="update-state">{{ update_status.state }}</span></div>
+            <div class="update-meta" id="update-message">{{ update_status.message }}</div>
+            <div class="tiny-label" id="update-updated-at">{% if update_status.updated_at %}Last update event: {{ update_status.updated_at }}{% endif %}</div>
+            <div class="tiny-label" id="update-details">{{ update_status.details or '' }}</div>
+            <form action="/update-software" method="POST" style="display:inline;">
+                <button class="btn-update" id="update-button" type="submit" {% if update_status.state in ['running', 'restarting'] %}disabled{% endif %}>Update Software</button>
+            </form>
+        </div>
         <a href="/gallery" class="btn-gallery">View Recordings</a>
     {% endif %}
 
@@ -156,6 +171,10 @@
             var destinationInputs = document.querySelectorAll('input[name="destination"]');
             var freeEl = document.getElementById('idle-free-space');
             var destinationEl = document.getElementById('idle-destination-name');
+            var updateStateEl = document.getElementById('update-state');
+            var updateMessageEl = document.getElementById('update-message');
+            var updateDetailsEl = document.getElementById('update-details');
+            var updateButtonEl = document.getElementById('update-button');
 
             function getSelectedDestination() {
                 for (var index = 0; index < destinationInputs.length; index += 1) {
@@ -181,11 +200,33 @@
                     .catch(function() { });
             }
 
+            function updateSoftwareStatus() {
+                fetch('/api/update-status')
+                    .then(function(response) { return response.json(); })
+                    .then(function(data) {
+                        if (updateStateEl && data.state) {
+                            updateStateEl.textContent = data.state;
+                        }
+                        if (updateMessageEl && data.message) {
+                            updateMessageEl.textContent = data.message;
+                        }
+                        if (updateDetailsEl) {
+                            updateDetailsEl.textContent = data.details || '';
+                        }
+                        if (updateButtonEl) {
+                            updateButtonEl.disabled = data.state === 'running' || data.state === 'restarting';
+                        }
+                    })
+                    .catch(function() { });
+            }
+
             for (var index = 0; index < destinationInputs.length; index += 1) {
                 destinationInputs[index].addEventListener('change', updateDestinationInfo);
             }
 
             updateDestinationInfo();
+            updateSoftwareStatus();
+            setInterval(updateSoftwareStatus, 3000);
         })();
     </script>
     {% endif %}
