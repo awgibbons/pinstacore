@@ -169,6 +169,36 @@ def gather_sessions():
     return sessions
 
 
+def get_latest_session_summary():
+    latest = None
+    for item in DESTINATION_OPTIONS:
+        base = item["path"]
+        if not os.path.isdir(base):
+            continue
+
+        for name in os.listdir(base):
+            session_dir = os.path.join(base, name)
+            if not os.path.isdir(session_dir):
+                continue
+
+            mtime = os.path.getmtime(session_dir)
+            if latest is None or mtime > latest["mtime"]:
+                status = read_analysis_status(session_dir)
+                latest = {
+                    "name": name,
+                    "destination_key": item["key"],
+                    "destination_label": item["label"],
+                    "display_time": format_session_datetime(name),
+                    "size": format_size(get_directory_size_bytes(session_dir)),
+                    "mtime": mtime,
+                    "analysis_state": status.get("state", "not_run"),
+                    "analysis_error": status.get("error"),
+                    "has_report": os.path.exists(get_report_path(session_dir)),
+                }
+
+    return latest
+
+
 def is_destination_available(destination_key):
     path = get_destination_path(destination_key)
     if not path:
@@ -350,9 +380,8 @@ def build_home_context(error_msg=None):
         )
 
     latest_session = None
-    sessions = gather_sessions()
-    if sessions:
-        latest_session = sessions[0]
+    if not is_recording:
+        latest_session = get_latest_session_summary()
 
     return {
         "is_recording": is_recording,
