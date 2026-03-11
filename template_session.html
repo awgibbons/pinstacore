@@ -17,6 +17,10 @@
         .analysis-box { background-color: #202020; border: 1px solid #3a3a3a; border-radius: 10px; padding: 14px; margin-top: 14px; }
         .analysis-title { font-size: 18px; color: #bbb; margin-bottom: 6px; }
         .analysis-meta { font-size: 15px; color: #ddd; line-height: 1.4; }
+        .progress-wrap { margin-top: 10px; }
+        .progress-track { width: 100%; height: 12px; background-color: #2a2a2a; border: 1px solid #444; border-radius: 999px; overflow: hidden; }
+        .progress-fill { height: 100%; width: 0%; background: linear-gradient(90deg, #22c55e, #16a34a); transition: width 0.25s ease; }
+        .progress-text { font-size: 13px; color: #a9a9a9; margin-top: 6px; line-height: 1.4; }
         .hidden { display: none !important; }
         .btn-action { background-color: #0a7f42; color: white; text-decoration: none; padding: 12px 20px; border-radius: 8px; font-size: 16px; font-weight: bold; border: none; cursor: pointer; }
         .btn-action:active { background-color: #086635; }
@@ -32,6 +36,10 @@
     <div class="analysis-box">
         <div class="analysis-title">Drop-frame analysis</div>
         <div class="analysis-meta">Status: <span id="analysis-state">{{ analysis_state }}</span></div>
+        <div class="progress-wrap {% if analysis_state != 'running' %}hidden{% endif %}" id="analysis-progress-wrap" data-initial-progress='{{ analysis_progress_json|e }}'>
+            <div class="progress-track"><div class="progress-fill" id="analysis-progress-fill"></div></div>
+            <div class="progress-text" id="analysis-progress-text">Starting analysis...</div>
+        </div>
         <div class="analysis-meta {% if not analysis_error %}hidden{% endif %}" id="analysis-error-row">Error: <span id="analysis-error">{{ analysis_error or '' }}</span></div>
         <div class="action-row" style="margin-top:12px;">
             <form method="POST" action="/analyze/{{ destination_key }}/{{ session_name }}" style="margin:0;">
@@ -39,6 +47,7 @@
             </form>
             <a href="/analysis/report/{{ destination_key }}/{{ session_name }}" class="btn-view-report {% if not has_report %}hidden{% endif %}" id="report-link">View Report</a>
             <a href="/analysis/json/{{ destination_key }}/{{ session_name }}" class="btn-view-report {% if not has_analysis_json %}hidden{% endif %}" id="json-link">View JSON</a>
+            <a href="/analysis/log/{{ destination_key }}/{{ session_name }}" class="btn-view-report {% if not has_analysis_log %}hidden{% endif %}" id="log-link">View Analyzer Log</a>
         </div>
     </div>
     
@@ -67,6 +76,19 @@
             var buttonEl = document.getElementById('analysis-button');
             var reportLinkEl = document.getElementById('report-link');
             var jsonLinkEl = document.getElementById('json-link');
+            var logLinkEl = document.getElementById('log-link');
+            var progressWrapEl = document.getElementById('analysis-progress-wrap');
+            var progressFillEl = document.getElementById('analysis-progress-fill');
+            var progressTextEl = document.getElementById('analysis-progress-text');
+            var initialProgress = null;
+
+            if (progressWrapEl) {
+                try {
+                    initialProgress = JSON.parse(progressWrapEl.getAttribute('data-initial-progress') || 'null');
+                } catch (e) {
+                    initialProgress = null;
+                }
+            }
 
             function setHidden(element, hidden) {
                 if (!element) {
@@ -77,6 +99,46 @@
                 } else {
                     element.classList.remove('hidden');
                 }
+            }
+
+            function updateProgress(progress, state) {
+                if (!progressWrapEl || !progressFillEl || !progressTextEl) {
+                    return;
+                }
+
+                if (state !== 'running') {
+                    setHidden(progressWrapEl, true);
+                    return;
+                }
+
+                setHidden(progressWrapEl, false);
+
+                var totalFiles = Number(progress && progress.total_files || 0);
+                var completedFiles = Number(progress && progress.completed_files || 0);
+                var currentFile = progress && progress.current_file;
+                var framesProcessed = Number(progress && progress.current_file_frames_processed || 0);
+
+                var pct = 0;
+                if (totalFiles > 0) {
+                    pct = Math.max(0, Math.min(100, (completedFiles / totalFiles) * 100));
+                }
+                progressFillEl.style.width = pct.toFixed(1) + '%';
+
+                var text = '';
+                if (totalFiles > 0) {
+                    text = 'Files: ' + completedFiles + '/' + totalFiles + ' (' + Math.round(pct) + '%)';
+                } else {
+                    text = 'Preparing analysis...';
+                }
+
+                if (currentFile) {
+                    text += ' | Current: ' + currentFile;
+                }
+                if (framesProcessed > 0) {
+                    text += ' | Frames processed: ' + framesProcessed.toLocaleString();
+                }
+
+                progressTextEl.textContent = text;
             }
 
             function updateStatus() {
@@ -90,6 +152,8 @@
                         if (stateEl && data.state) {
                             stateEl.textContent = data.state;
                         }
+
+                        updateProgress(data.progress, data.state);
 
                         if (buttonEl) {
                             buttonEl.textContent = data.state === 'complete' ? 'Re-run Analysis' : 'Run Analysis';
@@ -110,9 +174,13 @@
                         if (jsonLinkEl && data.json_url) {
                             jsonLinkEl.href = data.json_url;
                         }
+                        if (logLinkEl && data.log_url) {
+                            logLinkEl.href = data.log_url;
+                        }
 
                         setHidden(reportLinkEl, !data.has_report);
                         setHidden(jsonLinkEl, !data.has_analysis_json);
+                        setHidden(logLinkEl, !data.has_analysis_log);
 
                         if (data.state === 'complete' || data.state === 'failed' || data.state === 'not_run') {
                             clearInterval(intervalId);
@@ -122,6 +190,7 @@
             }
 
             var intervalId = setInterval(updateStatus, 2000);
+            updateProgress(initialProgress, '{{ analysis_state }}');
             updateStatus();
         })();
     </script>

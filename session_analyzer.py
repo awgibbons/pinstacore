@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import glob
+import argparse
 import json
 import os
 import subprocess
@@ -30,6 +31,26 @@ def parse_fraction(value):
 def run_ffprobe(args):
     cmd = ["ffprobe", "-v", "error"] + args
     return subprocess.run(cmd, capture_output=True, text=True, check=True)
+
+
+def write_status(status_path, state, progress=None, error=None):
+    if not status_path:
+        return
+
+    payload = {
+        "state": state,
+        "updated_at": int(datetime.utcnow().timestamp()),
+    }
+    if progress is not None:
+        payload["progress"] = progress
+    if error:
+        payload["error"] = error
+
+    try:
+        with open(status_path, "w", encoding="utf-8") as handle:
+            json.dump(payload, handle, indent=2)
+    except OSError:
+        pass
 
 
 def get_nominal_fps(video_file):
@@ -67,7 +88,7 @@ def get_video_duration(video_file):
     return float(result.stdout.strip())
 
 
-def get_frame_timestamps(video_file):
+def get_frame_timestamps(video_file, progress_callback=None, progress_every=5000):
     result = run_ffprobe(
         [
             "-show_entries",
@@ -84,12 +105,16 @@ def get_frame_timestamps(video_file):
             continue
         try:
             timestamps.append(float(raw))
+            if progress_callback and len(timestamps) % progress_every == 0:
+                progress_callback(len(timestamps))
         except ValueError:
             pass
+    if progress_callback:
+        progress_callback(len(timestamps))
     return timestamps
 
 
-def analyze_video(video_file, default_fps=30.0, threshold_multiplier=1.5):
+def analyze_video(video_file, default_fps=30.0, threshold_multiplier=1.5, progress_callback=None):
     file_name = os.path.basename(video_file)
     try:
         nominal_fps = get_nominal_fps(video_file)
@@ -101,7 +126,7 @@ def analyze_video(video_file, default_fps=30.0, threshold_multiplier=1.5):
     except Exception:
         duration = 0.0
 
-    timestamps = get_frame_timestamps(video_file)
+    timestamps = get_frame_timestamps(video_file, progress_callback=progress_callback)
     actual_frames = len(timestamps)
     expected_frames = int(round(duration * nominal_fps)) if duration > 0 else actual_frames
 
@@ -228,13 +253,16 @@ def write_report(report_path, session_name, analysis_data):
 
 
 def main():
-    if len(sys.argv) < 2:
-        print("Usage: session_analyzer.py <recording_metrics.json>")
-        return 1
+    parser = argparse.ArgumentParser(description="Analyze session recordings for dropped-frame anomalies.")
+    parser.add_argument("metrics_path", help="Path to recording_metrics.json")
+    parser.add_argument("--status-path", dest="status_path", default=None, help="Optional analysis_status.json path")
+    args = parser.parse_args()
 
-    metrics_path = sys.argv[1]
+    metrics_path = args.metrics_path
+    status_path = args.status_path
     if not os.path.exists(metrics_path):
         print(f"Metrics file not found: {metrics_path}")
+        write_status(status_path, "failed", error=f"Metrics file not found: {metrics_path}")
         return 1
 
     with open(metrics_path, "r", encoding="utf-8") as handle:
@@ -243,6 +271,7 @@ def main():
     session_dir = metrics.get("recording_dir")
     if not session_dir or not os.path.isdir(session_dir):
         print(f"Invalid recording_dir in metrics: {session_dir}")
+        write_status(status_path, "failed", error=f"Invalid recording_dir in metrics: {session_dir}")
         return 1
 
     session_name = metrics.get("session") or os.path.basename(session_dir)
@@ -255,14 +284,57 @@ def main():
 
     if not video_files:
         print(f"No video files found in {session_dir}")
+        write_status(status_path, "failed", error=f"No video files found in {session_dir}")
         return 1
 
     threshold_multiplier = 1.5
     target_fps = float(metrics.get("target_fps", 30))
 
+    total_files = len(video_files)
+    write_status(
+        status_path,
+        "running",
+        progress={
+            "total_files": total_files,
+            "completed_files": 0,
+            "current_file": os.path.basename(video_files[0]),
+            "current_file_frames_processed": 0,
+        },
+    )
+
     per_camera = []
-    for video_file in video_files:
-        per_camera.append(analyze_video(video_file, default_fps=target_fps, threshold_multiplier=threshold_multiplier))
+    for idx, video_file in enumerate(video_files):
+        current_file = os.path.basename(video_file)
+
+        def on_progress(frame_count):
+            write_status(
+                status_path,
+                "running",
+                progress={
+                    "total_files": total_files,
+                    "completed_files": idx,
+                    "current_file": current_file,
+                    "current_file_frames_processed": frame_count,
+                },
+            )
+
+        result = analyze_video(
+            video_file,
+            default_fps=target_fps,
+            threshold_multiplier=threshold_multiplier,
+            progress_callback=on_progress,
+        )
+        per_camera.append(result)
+        write_status(
+            status_path,
+            "running",
+            progress={
+                "total_files": total_files,
+                "completed_files": idx + 1,
+                "current_file": current_file,
+                "current_file_frames_processed": result["actual_frames"],
+            },
+        )
 
     totals_expected = sum(item["expected_frames"] for item in per_camera)
     totals_actual = sum(item["actual_frames"] for item in per_camera)
@@ -308,6 +380,16 @@ def main():
     print(f"Saved: {analysis_json_path}")
     print(f"Saved: {timestamps_path}")
     print(f"Saved: {report_path}")
+    write_status(
+        status_path,
+        "complete",
+        progress={
+            "total_files": total_files,
+            "completed_files": total_files,
+            "current_file": None,
+            "current_file_frames_processed": 0,
+        },
+    )
     return 0
 
 

@@ -57,9 +57,11 @@ You can run analysis in either of these places:
 
 Analysis behavior:
 - Analysis runs in the background.
+- While running, the session page shows a live progress bar (files completed) and current frame count for the active file.
 - You can re-run analysis later if you want fresh results.
 - Session pages show whether analysis has not run yet, is running, completed, or failed.
-- Once available, the session page provides links to `View Report` and `View JSON`.
+- Once available, the session page provides links to `View Report`, `View JSON`, and `View Analyzer Log`.
+- Analyzer timeout is controlled by `ANALYSIS_TIMEOUT_SECONDS` (default `0`, meaning no timeout).
 
 Drop detection rule:
 - A dropped-frame anomaly is flagged when the gap between adjacent frame timestamps is greater than `1.5x` the expected frame interval.

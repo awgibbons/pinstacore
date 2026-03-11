@@ -17,6 +17,7 @@ UPDATE_SCRIPT_PATH = os.path.join(BASE_DIR, "update_instacore.sh")
 UPDATE_STATUS_PATH = os.path.join(BASE_DIR, "update_status.json")
 SESSIONS_HOME_DIR = os.path.expanduser("~/sessions")
 SESSIONS_USB_DIR = "/mnt/sd/sessions"
+ANALYSIS_TIMEOUT_SECONDS = int(os.environ.get("ANALYSIS_TIMEOUT_SECONDS", "0") or "0")
 
 DESTINATION_OPTIONS = [
     {"key": "home", "label": "Home", "path": SESSIONS_HOME_DIR, "hint": "~/sessions"},
@@ -99,6 +100,10 @@ def get_report_path(session_dir):
     return os.path.join(session_dir, "report.md")
 
 
+def get_analysis_log_path(session_dir):
+    return os.path.join(session_dir, "analysis_runner.log")
+
+
 def load_json_file(path):
     try:
         with open(path, "r", encoding="utf-8") as handle:
@@ -143,13 +148,15 @@ def read_analysis_status(session_dir):
     return {"state": "not_run", "updated_at": None}
 
 
-def set_analysis_status(session_dir, state, error=None):
+def set_analysis_status(session_dir, state, error=None, progress=None):
     payload = {
         "state": state,
         "updated_at": int(time.time()),
     }
     if error:
         payload["error"] = error
+    if progress is not None:
+        payload["progress"] = progress
     write_json_file(get_status_path(session_dir), payload)
 
 
@@ -620,8 +627,11 @@ def session_detail(destination_key, session_name):
         files=files,
         analysis_state=status.get("state", "not_run"),
         analysis_error=status.get("error"),
+        analysis_progress=status.get("progress"),
+        analysis_progress_json=json.dumps(status.get("progress")) if status.get("progress") is not None else "null",
         has_report=os.path.exists(get_report_path(target_dir)),
         has_analysis_json=os.path.exists(get_analysis_path(target_dir)),
+        has_analysis_log=os.path.exists(get_analysis_log_path(target_dir)),
     )
 
 @app.route('/download/<destination_key>/<session_name>/<filename>')
@@ -648,24 +658,81 @@ def analyze_session_async(session_dir):
         set_analysis_status(session_dir, "failed", error="recording_metrics.json not found")
         return
 
-    set_analysis_status(session_dir, "running")
+    set_analysis_status(
+        session_dir,
+        "running",
+        progress={
+            "total_files": 0,
+            "completed_files": 0,
+            "current_file": None,
+            "current_file_frames_processed": 0,
+        },
+    )
+    def _to_text(value):
+        if value is None:
+            return ""
+        if isinstance(value, str):
+            return value
+        if isinstance(value, bytes):
+            return value.decode("utf-8", errors="replace")
+        if isinstance(value, memoryview):
+            return value.tobytes().decode("utf-8", errors="replace")
+        return str(value)
+
     try:
+        timeout_seconds = ANALYSIS_TIMEOUT_SECONDS if ANALYSIS_TIMEOUT_SECONDS > 0 else None
         proc = subprocess.run(
-            ["python3", ANALYZER_SCRIPT_PATH, metrics_path],
+            ["python3", ANALYZER_SCRIPT_PATH, metrics_path, "--status-path", get_status_path(session_dir)],
             capture_output=True,
             text=True,
             check=False,
-            timeout=600,
+            timeout=timeout_seconds,
         )
+        combined_output = (proc.stdout or "") + ("\n" if proc.stdout and proc.stderr else "") + (proc.stderr or "")
+        try:
+            with open(get_analysis_log_path(session_dir), "w", encoding="utf-8") as handle:
+                handle.write(combined_output)
+        except OSError:
+            pass
+    except subprocess.TimeoutExpired as exc:
+        partial = ""
+        if exc.stdout:
+            partial += _to_text(exc.stdout)
+        if exc.stderr:
+            if partial:
+                partial += "\n"
+            partial += _to_text(exc.stderr)
+        timeout_msg = f"Analysis timed out after {ANALYSIS_TIMEOUT_SECONDS}s"
+        try:
+            with open(get_analysis_log_path(session_dir), "w", encoding="utf-8") as handle:
+                handle.write(timeout_msg + "\n\n")
+                handle.write(partial)
+        except OSError:
+            pass
+        set_analysis_status(
+            session_dir,
+            "failed",
+            error=f"{timeout_msg}. Increase ANALYSIS_TIMEOUT_SECONDS or set it to 0 for no timeout.",
+        )
+        return
     except Exception as exc:
         set_analysis_status(session_dir, "failed", error=str(exc))
         return
 
     if proc.returncode == 0:
-        set_analysis_status(session_dir, "complete")
+        set_analysis_status(
+            session_dir,
+            "complete",
+            progress={
+                "total_files": 0,
+                "completed_files": 0,
+                "current_file": None,
+                "current_file_frames_processed": 0,
+            },
+        )
     else:
         error = (proc.stderr or proc.stdout or "Analyzer failed").strip()
-        set_analysis_status(session_dir, "failed", error=error[:400])
+        set_analysis_status(session_dir, "failed", error=(error[:320] + " (see analysis_runner.log)"))
 
 
 @app.route('/analyze/<destination_key>/<session_name>', methods=['POST'])
@@ -689,10 +756,13 @@ def api_analysis_status(destination_key, session_name):
     return {
         "state": status.get("state", "not_run"),
         "error": status.get("error"),
+        "progress": status.get("progress"),
         "has_report": os.path.exists(get_report_path(session_dir)),
         "has_analysis_json": os.path.exists(get_analysis_path(session_dir)),
+        "has_analysis_log": os.path.exists(get_analysis_log_path(session_dir)),
         "report_url": url_for('view_analysis_report', destination_key=destination_key, session_name=session_name),
         "json_url": url_for('view_analysis_json', destination_key=destination_key, session_name=session_name),
+        "log_url": url_for('view_analysis_log', destination_key=destination_key, session_name=session_name),
     }
 
 
@@ -718,6 +788,18 @@ def view_analysis_json(destination_key, session_name):
     if not os.path.exists(analysis_file):
         return "Analysis data not found.", 404
     return send_from_directory(session_dir, os.path.basename(analysis_file), as_attachment=False)
+
+
+@app.route('/analysis/log/<destination_key>/<session_name>')
+def view_analysis_log(destination_key, session_name):
+    session_dir = get_session_dir(destination_key, session_name)
+    if not session_dir:
+        return "Session not found.", 404
+
+    log_file = get_analysis_log_path(session_dir)
+    if not os.path.exists(log_file):
+        return "Analysis log not found.", 404
+    return send_from_directory(session_dir, os.path.basename(log_file), as_attachment=False)
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=80)
