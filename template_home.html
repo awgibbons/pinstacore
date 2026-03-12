@@ -22,6 +22,10 @@
         .dest-hint { color: #888; font-size: 14px; margin-left: 4px; }
         .status { margin-top: 30px; font-size: 24px; color: #888; text-align: center; }
         .recording-meta { margin-top: 16px; font-size: 22px; color: #bbb; text-align: center; line-height: 1.4; }
+        .recording-alert { margin-top: 16px; width: 340px; background-color: #3b2600; border: 1px solid #d38b00; border-radius: 12px; padding: 12px; color: #ffd58a; font-size: 15px; line-height: 1.4; text-align: left; }
+        .recording-alert b { color: #ffe5b6; }
+        .recording-alert.hidden { display: none; }
+        .recording-alert ul { margin: 8px 0 0 18px; padding: 0; }
         .timer { font-size: 40px; font-weight: bold; color: #fff; margin-top: 8px; }
         .error-box { background-color: #330000; color: #ff6666; padding: 20px; border-radius: 15px; border: 2px solid #ff3333; margin-bottom: 40px; font-size: 20px; max-width: 80%; white-space: pre-wrap; font-family: monospace; }
         .latest-box { margin-top: 20px; width: 340px; background-color: #202020; border: 1px solid #3a3a3a; border-radius: 12px; padding: 12px; text-align: left; }
@@ -57,6 +61,21 @@
             <div>Destination: <b id="destination-name">{{ recording_destination }}</b></div>
             <div>Current session size: <b id="session-size">{{ recording_size }}</b></div>
             <div>Free space: <b id="free-space">{{ free_space }}</b></div>
+        </div>
+        <div id="recording-alert" class="recording-alert {% if not recording_health or recording_health.ok %}hidden{% endif %}">
+            <b>Camera / USB Alert</b>
+            <ul id="recording-alert-list">
+                {% if recording_health and recording_health.alerts %}
+                    {% for item in recording_health.alerts %}
+                    <li>{{ item }}</li>
+                    {% endfor %}
+                {% endif %}
+                {% if recording_health and recording_health.usb_hints %}
+                    {% for hint in recording_health.usb_hints %}
+                    <li>{{ hint }}</li>
+                    {% endfor %}
+                {% endif %}
+            </ul>
         </div>
     {% else %}
         <form action="/start" method="POST">
@@ -126,6 +145,8 @@
             var sizeEl = document.getElementById('session-size');
             var freeEl = document.getElementById('free-space');
             var destinationEl = document.getElementById('destination-name');
+            var alertBoxEl = document.getElementById('recording-alert');
+            var alertListEl = document.getElementById('recording-alert-list');
 
             function fmt(value) {
                 var sec = Math.max(0, value | 0);
@@ -155,6 +176,29 @@
                         }
                         if (destinationEl && data.destination) {
                             destinationEl.textContent = data.destination;
+                        }
+                        if (alertBoxEl && alertListEl) {
+                            var health = data.health || null;
+                            var messages = [];
+                            if (health && Array.isArray(health.alerts)) {
+                                messages = messages.concat(health.alerts);
+                            }
+                            if (health && Array.isArray(health.usb_hints)) {
+                                messages = messages.concat(health.usb_hints);
+                            }
+
+                            if (messages.length > 0) {
+                                alertListEl.innerHTML = messages.map(function (msg) {
+                                    return '<li>' + String(msg)
+                                        .replace(/&/g, '&amp;')
+                                        .replace(/</g, '&lt;')
+                                        .replace(/>/g, '&gt;') + '</li>';
+                                }).join('');
+                                alertBoxEl.classList.remove('hidden');
+                            } else {
+                                alertListEl.innerHTML = '';
+                                alertBoxEl.classList.add('hidden');
+                            }
                         }
                     })
                     .catch(function() { });

@@ -40,6 +40,13 @@ RECORDING_STATE = {
     "end_ts": None,
     "pending_until": None,
     "destination": DEFAULT_DESTINATION,
+    "expected_cameras": [],
+    "throttled_start": None,
+}
+
+HEALTH_CACHE = {
+    "expires_at": 0.0,
+    "snapshot": None,
 }
 
 # Ensure the sessions directory exists even if we haven't recorded yet
@@ -62,6 +69,123 @@ def get_recordable_cameras(max_cameras=8):
         if os.path.exists(node):
             cameras.append(node)
     return cameras
+
+
+def get_ffmpeg_process_count():
+    try:
+        output = subprocess.check_output(["pgrep", "-c", "-x", "ffmpeg"], text=True).strip()
+        return int(output or "0")
+    except (subprocess.CalledProcessError, ValueError):
+        return 0
+
+
+def get_recent_usb_kernel_hints():
+    try:
+        proc = subprocess.run(
+            ["bash", "-lc", "dmesg | tail -n 120"],
+            capture_output=True,
+            text=True,
+            timeout=1.2,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return []
+
+    if proc.returncode != 0 or not proc.stdout:
+        return []
+
+    hints = []
+    patterns = [
+        "usb disconnect",
+        "reset high-speed usb device",
+        "device descriptor read/64",
+        "i/o error",
+        "not responding to setup address",
+    ]
+    for line in proc.stdout.splitlines():
+        lower = line.lower()
+        if any(token in lower for token in patterns):
+            hints.append(line.strip())
+
+    # Keep only the latest few lines so the API payload stays small.
+    return hints[-3:]
+
+
+def get_pi_throttled_value():
+    try:
+        output = subprocess.check_output(["vcgencmd", "get_throttled"], text=True, timeout=1).strip()
+    except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired):
+        return None
+
+    if "=" not in output:
+        return None
+
+    raw = output.split("=", 1)[1].strip()
+    try:
+        return int(raw, 16)
+    except ValueError:
+        return None
+
+
+def get_recording_health(force=False):
+    now = time.time()
+    if (not force) and HEALTH_CACHE["snapshot"] is not None and now < HEALTH_CACHE["expires_at"]:
+        return HEALTH_CACHE["snapshot"]
+
+    expected = list(RECORDING_STATE.get("expected_cameras") or [])
+    current = get_recordable_cameras(max_cameras=8)
+    missing = [dev for dev in expected if dev not in current]
+    ffmpeg_count = get_ffmpeg_process_count()
+
+    alerts = []
+    if missing:
+        alerts.append(
+            "Camera device missing: " + ", ".join(missing)
+        )
+
+    if expected and ffmpeg_count and ffmpeg_count < len(expected):
+        alerts.append(
+            f"Camera recorder dropped: {ffmpeg_count}/{len(expected)} ffmpeg processes still running"
+        )
+
+    usb_hints = get_recent_usb_kernel_hints()
+    if usb_hints:
+        alerts.append("Recent USB kernel events detected")
+
+    throttled_value = get_pi_throttled_value()
+    undervoltage_now = False
+    undervoltage_since_boot = False
+    undervoltage_since_recording_start = False
+    if throttled_value is not None:
+        undervoltage_now = bool(throttled_value & 0x1)
+        undervoltage_since_boot = bool(throttled_value & 0x10000)
+        start_flags = RECORDING_STATE.get("throttled_start")
+        if start_flags is not None:
+            undervoltage_since_recording_start = bool(
+                (throttled_value & 0x10000) and not (start_flags & 0x10000)
+            )
+
+    if undervoltage_now:
+        alerts.append("Power warning: undervoltage active now")
+    elif undervoltage_since_recording_start:
+        alerts.append("Power warning: undervoltage occurred during this recording")
+
+    snapshot = {
+        "ok": len(alerts) == 0,
+        "alerts": alerts,
+        "missing_devices": missing,
+        "ffmpeg_process_count": ffmpeg_count,
+        "expected_camera_count": len(expected),
+        "usb_hints": usb_hints,
+        "throttled_value": throttled_value,
+        "undervoltage_now": undervoltage_now,
+        "undervoltage_since_boot": undervoltage_since_boot,
+        "undervoltage_since_recording_start": undervoltage_since_recording_start,
+        "updated_at": int(now),
+    }
+    HEALTH_CACHE["snapshot"] = snapshot
+    HEALTH_CACHE["expires_at"] = now + 3.0
+    return snapshot
 
 
 def get_destination_path(destination_key):
@@ -476,6 +600,8 @@ def build_home_context(error_msg=None):
         remaining_seconds = max(0, int(RECORDING_STATE["end_ts"] - time.time()))
         remaining_label = format_remaining(remaining_seconds)
 
+    recording_health = get_recording_health() if is_recording else None
+
     destination_key = RECORDING_STATE["destination"]
     sessions_dir = get_destination_path(destination_key) or SESSIONS_HOME_DIR
 
@@ -514,6 +640,7 @@ def build_home_context(error_msg=None):
         "free_space": free_space,
         "selected_destination": destination_key,
         "recording_destination": get_destination_label(destination_key),
+        "recording_health": recording_health,
         "destination_options": destination_options,
         "latest_session": latest_session,
         "update_status": update_status,
@@ -566,6 +693,11 @@ def start_recording():
             **build_home_context(error_msg="No cameras detected. Connect at least one camera and try again."),
         )
 
+    RECORDING_STATE["expected_cameras"] = cameras
+    RECORDING_STATE["throttled_start"] = get_pi_throttled_value()
+    HEALTH_CACHE["snapshot"] = None
+    HEALTH_CACHE["expires_at"] = 0.0
+
     if not check_recording():
         try:
             # Fire-and-forget so the HTTP request returns immediately.
@@ -596,6 +728,7 @@ def api_session_size():
         "size": recording_size,
         "free_space": free_space,
         "destination": get_destination_label(destination_key),
+        "health": get_recording_health(),
     }
 
 
@@ -668,6 +801,10 @@ def stop_recording():
 
     RECORDING_STATE["end_ts"] = None
     RECORDING_STATE["pending_until"] = None
+    RECORDING_STATE["expected_cameras"] = []
+    RECORDING_STATE["throttled_start"] = None
+    HEALTH_CACHE["snapshot"] = None
+    HEALTH_CACHE["expires_at"] = 0.0
     return redirect(url_for('home'))
 
 # --- NEW GALLERY ROUTES ---
