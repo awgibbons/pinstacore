@@ -1,4 +1,4 @@
-from flask import Flask, render_template, redirect, request, url_for, send_from_directory
+from flask import Flask, render_template, redirect, request, url_for, send_from_directory, Response
 import subprocess
 import os
 import time
@@ -872,6 +872,62 @@ def view_analysis_log(destination_key, session_name):
     if not os.path.exists(log_file):
         return "Analysis log not found.", 404
     return send_from_directory(session_dir, os.path.basename(log_file), as_attachment=False)
+
+
+@app.route('/preview')
+def preview():
+    cameras = get_recordable_cameras(max_cameras=8)
+    cam_indices = list(range(len(cameras)))
+    is_recording = check_recording()
+    try:
+        selected_cam = int(request.args.get('cam', '0'))
+    except ValueError:
+        selected_cam = 0
+    if selected_cam < 0 or selected_cam >= len(cameras):
+        selected_cam = 0
+    return render_template(
+        'template_preview.html',
+        cam_indices=cam_indices,
+        selected_cam=selected_cam,
+        is_recording=is_recording,
+    )
+
+
+@app.route('/preview/snapshot')
+def preview_snapshot():
+    try:
+        cam_idx = int(request.args.get('cam', '0'))
+    except ValueError:
+        cam_idx = 0
+
+    cameras = get_recordable_cameras(max_cameras=8)
+    if cam_idx < 0 or cam_idx >= len(cameras):
+        return Response('Camera not found', status=404, mimetype='text/plain')
+
+    node = cameras[cam_idx]
+    try:
+        result = subprocess.run(
+            [
+                'ffmpeg', '-y',
+                '-f', 'v4l2', '-input_format', 'mjpeg',
+                '-framerate', '5',
+                '-i', node,
+                '-frames:v', '1',
+                '-vf', 'scale=320:-1',
+                '-f', 'image2',
+                'pipe:1',
+            ],
+            capture_output=True,
+            timeout=6,
+        )
+        if result.returncode != 0 or not result.stdout:
+            return Response('Camera unavailable', status=503, mimetype='text/plain')
+        return Response(result.stdout, mimetype='image/jpeg')
+    except subprocess.TimeoutExpired:
+        return Response('Camera unavailable', status=503, mimetype='text/plain')
+    except OSError:
+        return Response('Camera unavailable', status=503, mimetype='text/plain')
+
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=80)

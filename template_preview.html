@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Live Preview — Instacore</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=0">
+    <style>
+        body { background-color: #1a1a1a; display: flex; flex-direction: column; align-items: center; min-height: 100vh; margin: 0; padding: 20px 0 40px; box-sizing: border-box; font-family: sans-serif; color: white; }
+        .back-link { align-self: flex-start; margin-left: 20px; color: #888; font-size: 18px; text-decoration: none; margin-bottom: 10px; }
+        .back-link:active { color: #ccc; }
+        h1 { font-size: 26px; margin: 6px 0 18px; color: #eee; }
+        .warning-box { background-color: #332200; color: #ffaa44; padding: 14px 20px; border-radius: 10px; border: 1px solid #ff8800; margin-bottom: 20px; font-size: 16px; max-width: 360px; text-align: center; line-height: 1.5; }
+        .cam-tabs { display: flex; gap: 10px; margin-bottom: 16px; flex-wrap: wrap; justify-content: center; }
+        .cam-tab { background-color: #333; color: #ccc; border: 1px solid #555; padding: 10px 22px; border-radius: 8px; font-size: 16px; text-decoration: none; }
+        .cam-tab.active { background-color: #555; color: #fff; border-color: #999; }
+        .cam-tab:active { background-color: #444; }
+        .preview-wrap { width: 320px; background-color: #111; border: 1px solid #333; border-radius: 10px; overflow: hidden; min-height: 180px; display: flex; align-items: center; justify-content: center; }
+        .preview-wrap img { display: block; width: 100%; }
+        .placeholder { color: #555; font-size: 14px; }
+        .preview-status { font-size: 14px; color: #888; margin-top: 10px; min-height: 20px; }
+    </style>
+</head>
+<body>
+    <a class="back-link" href="/">← Back</a>
+    <h1>Live Preview</h1>
+
+    {% if is_recording %}
+    <div class="warning-box">Recording in progress — cameras are in use and cannot be previewed right now.</div>
+
+    {% elif not cam_indices %}
+    <div class="warning-box">No cameras detected. Connect at least one camera.</div>
+
+    {% else %}
+    <div class="cam-tabs">
+        {% for idx in cam_indices %}
+        <a class="cam-tab {% if idx == selected_cam %}active{% endif %}" href="/preview?cam={{ idx }}">Camera {{ idx + 1 }}</a>
+        {% endfor %}
+    </div>
+
+    <div class="preview-wrap">
+        <img id="preview-img" src="" alt="Camera feed">
+    </div>
+    <div class="preview-status" id="preview-status">Connecting...</div>
+
+    <script>
+        (function () {
+            var img = document.getElementById('preview-img');
+            var status = document.getElementById('preview-status');
+            var cam = {{ selected_cam }};
+            var REFRESH_MS = 1500;
+            var ERROR_BACKOFF_MS = 3000;
+            var timer = null;
+            var errorCount = 0;
+
+            function refresh() {
+                var url = '/preview/snapshot?cam=' + cam + '&t=' + Date.now();
+                var newImg = new Image();
+                newImg.onload = function () {
+                    img.src = newImg.src;
+                    status.textContent = 'Live';
+                    errorCount = 0;
+                    timer = setTimeout(refresh, REFRESH_MS);
+                };
+                newImg.onerror = function () {
+                    errorCount++;
+                    status.textContent = errorCount === 1
+                        ? 'Camera unavailable'
+                        : 'Camera unavailable (' + errorCount + ' consecutive errors)';
+                    timer = setTimeout(refresh, ERROR_BACKOFF_MS);
+                };
+                newImg.src = url;
+            }
+
+            refresh();
+        })();
+    </script>
+    {% endif %}
+</body>
+</html>
