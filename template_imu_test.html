@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>IMU Test — Instacore</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=0">
+    <style>
+        body { background-color: #1a1a1a; display: flex; flex-direction: column; align-items: center; min-height: 100vh; margin: 0; padding: 20px 0 40px; box-sizing: border-box; font-family: sans-serif; color: white; }
+        .back-link { align-self: flex-start; margin-left: 20px; color: #888; font-size: 18px; text-decoration: none; margin-bottom: 6px; }
+        h1 { font-size: 26px; margin: 6px 0 16px; }
+        .warning-box { background: #332200; color: #ffaa44; border: 1px solid #ff8800; padding: 14px 20px; border-radius: 10px; margin-bottom: 16px; max-width: 360px; text-align: center; font-size: 16px; line-height: 1.5; }
+        .status-bar { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
+        .status-dot { width: 10px; height: 10px; border-radius: 50%; background: #555; flex-shrink: 0; }
+        .status-dot.ok { background: #2aff2a; }
+        .status-dot.error { background: #ff3333; }
+        .status-text { font-size: 16px; color: #bbb; }
+        .dropout-badge { font-size: 12px; background: #2a2a2a; padding: 3px 10px; border-radius: 20px; color: #888; }
+        .dropout-badge.has-dropouts { background: #3b1a00; color: #ffaa44; }
+        .btn-stream { background: #1a3a5c; color: white; border: none; border-radius: 10px; padding: 14px 32px; font-size: 18px; cursor: pointer; margin-bottom: 20px; transition: background 0.1s; }
+        .btn-stream.active { background: #4a1a1a; }
+        .btn-stream:active { opacity: 0.8; }
+        canvas#horizon { border-radius: 50%; display: block; margin-bottom: 20px; }
+        .sensor-group { width: 320px; background: #202020; border: 1px solid #3a3a3a; border-radius: 12px; padding: 12px 14px; margin-bottom: 14px; }
+        .sensor-title { font-size: 12px; color: #777; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 10px; }
+        .bar-row { display: flex; align-items: center; gap: 10px; margin: 7px 0; }
+        .bar-row label { width: 14px; color: #aaa; font-size: 14px; text-align: right; flex-shrink: 0; }
+        .bar-track { position: relative; flex: 1; height: 18px; background: #2a2a2a; border-radius: 4px; overflow: hidden; }
+        .bar-track::after { content: ''; position: absolute; left: 50%; top: 0; bottom: 0; width: 1px; background: #555; pointer-events: none; }
+        .bar-fill { position: absolute; top: 2px; bottom: 2px; border-radius: 3px; width: 0; left: 50%; }
+        .bar-val { width: 54px; text-align: right; font-size: 13px; font-family: monospace; color: #ddd; flex-shrink: 0; }
+        .temp-box { background: #202020; border: 1px solid #3a3a3a; border-radius: 10px; padding: 10px 24px; margin-bottom: 14px; text-align: center; color: #ddd; font-size: 18px; min-width: 200px; }
+        .temp-label { font-size: 12px; color: #777; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 4px; }
+        .error-box { width: 300px; background: #330000; color: #ff6666; border: 1px solid #ff3333; border-radius: 10px; padding: 12px 16px; font-size: 14px; margin-bottom: 14px; display: none; word-break: break-word; }
+    </style>
+</head>
+<body>
+    <a class="back-link" href="/">← Back</a>
+    <h1>IMU Test</h1>
+
+    {% if is_recording %}
+    <div class="warning-box">Recording in progress — IMU streaming is disabled while a recording is active.</div>
+    {% else %}
+
+    <div class="status-bar">
+        <div class="status-dot" id="status-dot"></div>
+        <span class="status-text" id="status-text">Ready</span>
+        <span class="dropout-badge" id="dropout-badge">0 dropouts</span>
+    </div>
+
+    <button class="btn-stream" id="stream-btn" onclick="toggleStream()">Start Streaming</button>
+
+    <canvas id="horizon" width="220" height="220"></canvas>
+
+    <div class="sensor-group">
+        <div class="sensor-title">Accelerometer (g) &mdash; &plusmn;2 g</div>
+        <div class="bar-row"><label>X</label><div class="bar-track"><div class="bar-fill" id="bar-ax"></div></div><span class="bar-val" id="val-ax">&mdash;</span></div>
+        <div class="bar-row"><label>Y</label><div class="bar-track"><div class="bar-fill" id="bar-ay"></div></div><span class="bar-val" id="val-ay">&mdash;</span></div>
+        <div class="bar-row"><label>Z</label><div class="bar-track"><div class="bar-fill" id="bar-az"></div></div><span class="bar-val" id="val-az">&mdash;</span></div>
+    </div>
+
+    <div class="sensor-group">
+        <div class="sensor-title">Gyroscope (&deg;/s) &mdash; &plusmn;250 &deg;/s</div>
+        <div class="bar-row"><label>X</label><div class="bar-track"><div class="bar-fill" id="bar-gx"></div></div><span class="bar-val" id="val-gx">&mdash;</span></div>
+        <div class="bar-row"><label>Y</label><div class="bar-track"><div class="bar-fill" id="bar-gy"></div></div><span class="bar-val" id="val-gy">&mdash;</span></div>
+        <div class="bar-row"><label>Z</label><div class="bar-track"><div class="bar-fill" id="bar-gz"></div></div><span class="bar-val" id="val-gz">&mdash;</span></div>
+    </div>
+
+    <div class="temp-box">
+        <div class="temp-label">Temperature</div>
+        <div id="temp-val">&mdash;</div>
+    </div>
+
+    <div class="error-box" id="error-box"></div>
+
+    <script>
+    (function () {
+        var streaming = false;
+        var pollTimer = null;
+        var dropouts = 0;
+        var consecutiveErrors = 0;
+
+        var btnEl      = document.getElementById('stream-btn');
+        var dotEl      = document.getElementById('status-dot');
+        var textEl     = document.getElementById('status-text');
+        var badgeEl    = document.getElementById('dropout-badge');
+        var errorEl    = document.getElementById('error-box');
+        var canvas     = document.getElementById('horizon');
+        var ctx        = canvas ? canvas.getContext('2d') : null;
+
+        window.toggleStream = function () {
+            if (streaming) {
+                streaming = false;
+                clearInterval(pollTimer);
+                pollTimer = null;
+                btnEl.textContent = 'Start Streaming';
+                btnEl.classList.remove('active');
+                dotEl.className = 'status-dot';
+                textEl.textContent = 'Stopped';
+                drawIdle();
+            } else {
+                streaming = true;
+                dropouts = 0;
+                consecutiveErrors = 0;
+                updateBadge();
+                btnEl.textContent = 'Stop Streaming';
+                btnEl.classList.add('active');
+                textEl.textContent = 'Connecting\u2026';
+                poll();
+                pollTimer = setInterval(poll, 150);
+            }
+        };
+
+        function poll() {
+            fetch('/api/imu-data')
+                .then(function (r) { return r.json(); })
+                .then(function (data) {
+                    if (!data.ok) {
+                        onError(data.error || 'Unknown error');
+                        return;
+                    }
+                    consecutiveErrors = 0;
+                    errorEl.style.display = 'none';
+                    dotEl.className = 'status-dot ok';
+                    textEl.textContent = 'Streaming';
+                    updateDisplay(data);
+                })
+                .catch(function () { onError('Connection lost'); });
+        }
+
+        function onError(msg) {
+            consecutiveErrors++;
+            dropouts++;
+            updateBadge();
+            dotEl.className = 'status-dot error';
+            textEl.textContent = 'Error (' + consecutiveErrors + ' consecutive)';
+            errorEl.textContent = msg;
+            errorEl.style.display = 'block';
+        }
+
+        function updateBadge() {
+            badgeEl.textContent = dropouts + (dropouts === 1 ? ' dropout' : ' dropouts');
+            badgeEl.className = 'dropout-badge' + (dropouts > 0 ? ' has-dropouts' : '');
+        }
+
+        function updateDisplay(d) {
+            setBar('ax', d.accel.x, -2, 2);
+            setBar('ay', d.accel.y, -2, 2);
+            setBar('az', d.accel.z, -2, 2);
+            setBar('gx', d.gyro.x, -250, 250);
+            setBar('gy', d.gyro.y, -250, 250);
+            setBar('gz', d.gyro.z, -250, 250);
+            document.getElementById('temp-val').textContent =
+                d.temp_c.toFixed(1) + '\u00b0C / ' + d.temp_f.toFixed(1) + '\u00b0F';
+            drawHorizon(d.accel.x, d.accel.y, d.accel.z);
+        }
+
+        function setBar(id, value, minV, maxV) {
+            var range = maxV - minV;
+            var zeroPos = (-minV / range) * 100;   // 50 for symmetric ranges
+            var valPos  = ((value - minV) / range) * 100;
+            var fill  = document.getElementById('bar-' + id);
+            var label = document.getElementById('val-' + id);
+            if (value >= 0) {
+                fill.style.left       = zeroPos + '%';
+                fill.style.width      = Math.max(0, Math.min(valPos - zeroPos, 100 - zeroPos)) + '%';
+                fill.style.background = '#3a7fd5';
+            } else {
+                fill.style.left       = Math.max(0, valPos) + '%';
+                fill.style.width      = Math.max(0, Math.min(zeroPos - valPos, zeroPos)) + '%';
+                fill.style.background = '#d53a3a';
+            }
+            label.textContent = value.toFixed(3);
+        }
+
+        function drawHorizon(ax, ay, az) {
+            if (!ctx) return;
+            var w = canvas.width, h = canvas.height;
+            var cx = w / 2, cy = h / 2, r = cx - 4;
+            var roll  = Math.atan2(ay, az);
+            var pitch = Math.atan2(-ax, Math.sqrt(ay * ay + az * az));
+            var pitchPx = pitch * 100;   // ~100px per radian
+
+            ctx.clearRect(0, 0, w, h);
+            ctx.save();
+            ctx.beginPath();
+            ctx.arc(cx, cy, r, 0, Math.PI * 2);
+            ctx.clip();
+
+            ctx.translate(cx, cy);
+            ctx.rotate(roll);
+
+            // Sky
+            ctx.fillStyle = '#1a2e4a';
+            ctx.fillRect(-w, -h + pitchPx, w * 2, h);
+            // Ground
+            ctx.fillStyle = '#3a2210';
+            ctx.fillRect(-w, pitchPx, w * 2, h);
+            // Horizon line
+            ctx.strokeStyle = '#ccc';
+            ctx.lineWidth = 1.5;
+            ctx.beginPath();
+            ctx.moveTo(-w, pitchPx);
+            ctx.lineTo(w, pitchPx);
+            ctx.stroke();
+            // Pitch scale tick marks every 15°
+            ctx.strokeStyle = '#666';
+            ctx.lineWidth = 1;
+            var stepPx = (15 * Math.PI / 180) * 100;
+            for (var i = 1; i <= 4; i++) {
+                var len = i % 2 === 0 ? 28 : 16;
+                var yAbove = pitchPx - i * stepPx;
+                var yBelow = pitchPx + i * stepPx;
+                ctx.beginPath(); ctx.moveTo(-len, yAbove); ctx.lineTo(len, yAbove); ctx.stroke();
+                ctx.beginPath(); ctx.moveTo(-len, yBelow); ctx.lineTo(len, yBelow); ctx.stroke();
+            }
+            ctx.restore();
+
+            // Fixed aircraft reference (not affected by rotation)
+            ctx.strokeStyle = '#ff9900';
+            ctx.lineWidth = 3;
+            ctx.lineCap = 'round';
+            ctx.beginPath(); ctx.moveTo(cx - 62, cy); ctx.lineTo(cx - 22, cy); ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(cx + 22, cy); ctx.lineTo(cx + 62, cy); ctx.stroke();
+            ctx.beginPath(); ctx.arc(cx, cy, 5, 0, Math.PI * 2);
+            ctx.fillStyle = '#ff9900'; ctx.fill();
+
+            // Border ring
+            ctx.beginPath();
+            ctx.arc(cx, cy, r, 0, Math.PI * 2);
+            ctx.strokeStyle = '#444';
+            ctx.lineWidth = 2;
+            ctx.stroke();
+        }
+
+        function drawIdle() {
+            if (!ctx) return;
+            var w = canvas.width, h = canvas.height;
+            var cx = w / 2, cy = h / 2, r = cx - 4;
+            ctx.clearRect(0, 0, w, h);
+            ctx.save();
+            ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.clip();
+            ctx.fillStyle = '#222'; ctx.fillRect(0, 0, w, h);
+            ctx.restore();
+            ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2);
+            ctx.strokeStyle = '#444'; ctx.lineWidth = 2; ctx.stroke();
+        }
+
+        drawIdle();
+    })();
+    </script>
+    {% endif %}
+</body>
+</html>

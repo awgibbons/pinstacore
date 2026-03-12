@@ -7,6 +7,14 @@ import shutil
 import json
 from datetime import datetime
 
+try:
+    import smbus2 as _smbus_lib
+except ImportError:
+    try:
+        import smbus as _smbus_lib
+    except ImportError:
+        _smbus_lib = None
+
 # Resolve paths from this script location so service can run from any repo path.
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 app = Flask(__name__, template_folder=BASE_DIR)
@@ -48,6 +56,13 @@ HEALTH_CACHE = {
     "expires_at": 0.0,
     "snapshot": None,
 }
+
+# ICM-20948 IMU — I2C bus 1 (GPIO2=SDA, GPIO3=SCL)
+_ICM_BUS  = 1
+_ICM_ADDR = 0x68        # AD0=GND → 0x68; AD0=VCC → 0x69
+_ICM_WHO_AM_I_VAL = 0xEA
+_icm_lock  = threading.Lock()
+_icm_awake = False
 
 # Ensure the sessions directory exists even if we haven't recorded yet
 os.makedirs(SESSIONS_HOME_DIR, exist_ok=True)
@@ -186,6 +201,62 @@ def get_recording_health(force=False):
     HEALTH_CACHE["snapshot"] = snapshot
     HEALTH_CACHE["expires_at"] = now + 3.0
     return snapshot
+
+
+def icm20948_read():
+    global _icm_awake
+    if _smbus_lib is None:
+        return {"ok": False, "error": "smbus library not installed — run: pip3 install smbus2"}
+    with _icm_lock:
+        try:
+            bus = _smbus_lib.SMBus(_ICM_BUS)
+            bus.write_byte_data(_ICM_ADDR, 0x7F, 0x00)       # select register bank 0
+            who = bus.read_byte_data(_ICM_ADDR, 0x00)         # WHO_AM_I
+            if who != _ICM_WHO_AM_I_VAL:
+                bus.close()
+                return {"ok": False, "error": f"WHO_AM_I=0x{who:02X} (expected 0xEA). Check address/wiring."}
+            if not _icm_awake:
+                bus.write_byte_data(_ICM_ADDR, 0x06, 0x01)   # PWR_MGMT_1: wake, auto-clock
+                time.sleep(0.03)
+                _icm_awake = True
+            # Read 14 bytes: ACCEL_XOUT_H(0x2D)..TEMP_OUT_L(0x3A)
+            raw = bus.read_i2c_block_data(_ICM_ADDR, 0x2D, 14)
+            bus.close()
+
+            def s16(hi, lo):
+                v = (hi << 8) | lo
+                return v - 0x10000 if v >= 0x8000 else v
+
+            ax = s16(raw[0],  raw[1])
+            ay = s16(raw[2],  raw[3])
+            az = s16(raw[4],  raw[5])
+            gx = s16(raw[6],  raw[7])
+            gy = s16(raw[8],  raw[9])
+            gz = s16(raw[10], raw[11])
+            tr = s16(raw[12], raw[13])
+            temp_c = round(tr / 333.87 + 21.0, 2)
+            return {
+                "ok": True,
+                "accel": {
+                    "x": round(ax / 16384.0, 4),
+                    "y": round(ay / 16384.0, 4),
+                    "z": round(az / 16384.0, 4),
+                },
+                "gyro": {
+                    "x": round(gx / 131.0, 3),
+                    "y": round(gy / 131.0, 3),
+                    "z": round(gz / 131.0, 3),
+                },
+                "temp_c": temp_c,
+                "temp_f": round(temp_c * 1.8 + 32.0, 2),
+                "ts": round(time.time() * 1000),
+            }
+        except OSError as exc:
+            _icm_awake = False
+            return {"ok": False, "error": f"I2C error: {exc}. Check wiring and that I2C is enabled."}
+        except Exception as exc:
+            _icm_awake = False
+            return {"ok": False, "error": str(exc)}
 
 
 def get_destination_path(destination_key):
@@ -1064,6 +1135,17 @@ def preview_snapshot():
         return Response('Camera unavailable', status=503, mimetype='text/plain')
     except OSError:
         return Response('Camera unavailable', status=503, mimetype='text/plain')
+
+
+@app.route('/imu-test')
+def imu_test_page():
+    is_recording = check_recording()
+    return render_template('template_imu_test.html', is_recording=is_recording)
+
+
+@app.route('/api/imu-data')
+def api_imu_data():
+    return icm20948_read()
 
 
 if __name__ == '__main__':
