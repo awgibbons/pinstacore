@@ -30,13 +30,67 @@ METRICS_FILE="$S_DIR/recording_metrics.json"
 echo 1000 | tee /sys/module/usbcore/parameters/usbfs_memory_mb > /dev/null
 
 # 2. Configure hardware
+#
+# To discover supported controls per camera on the Pi, run one of these:
+#   v4l2-ctl -d /dev/video0 --list-ctrls
+#   v4l2-ctl -d /dev/video0 --list-ctrls-menus
+#   v4l2-ctl -d /dev/video0 --all
+#
+# Helpful patterns:
+#   v4l2-ctl -d /dev/video0 --get-ctrl=brightness
+#   v4l2-ctl -d /dev/video0 --set-ctrl=brightness=128
+#   v4l2-ctl -d /dev/video0 --set-ctrl=brightness=128,contrast=32
+#
+# Notes:
+# - Controls are camera-specific. Not every camera exposes every option.
+# - If a control is unsupported, v4l2-ctl will print an error for that device.
+# - Some controls are only active in specific modes:
+#   - exposure_time_absolute is inactive unless auto_exposure=1 (Manual Mode)
+#   - white_balance_temperature is inactive unless white_balance_automatic=0
+#
+# This camera reports these control ranges/options:
+# User Controls
+#   brightness:                  -64..64 (default 0)
+#   contrast:                    0..64 (default 32)
+#   saturation:                  0..128 (default 64)
+#   hue:                         -40..40 (default 0)
+#   white_balance_automatic:     0/1 (default 1)
+#   gamma:                       72..500 (default 100)
+#   gain:                        0..100 (default 0)
+#   power_line_frequency menu:   0=Disabled, 1=50 Hz, 2=60 Hz
+#   white_balance_temperature:   2800..6500 (default 4600; inactive when auto WB is on)
+#   sharpness:                   0..6 (default 3)
+#   backlight_compensation:      0..2 (default 1)
+# Camera Controls
+#   auto_exposure menu:          1=Manual Mode, 3=Aperture Priority Mode
+#   exposure_time_absolute:      1..5000 (default 157; inactive unless manual exposure)
+#   exposure_dynamic_framerate:  0/1 (default 0)
 for dev in "${CAMERAS[@]}"; do
     (
         v4l2-ctl -d "$dev" -c power_line_frequency=2
         v4l2-ctl -d "$dev" -c exposure_dynamic_framerate=0
         v4l2-ctl -d "$dev" -c auto_exposure=3
         v4l2-ctl -d "$dev" -c white_balance_automatic=1
-        #v4l2-ctl -d "$dev" -c exposure_time_absolute=100
+        # --- Optional controls for this camera (commented; enable only if needed) ---
+        # v4l2-ctl -d "$dev" -c brightness=0                 # range -64..64
+        # v4l2-ctl -d "$dev" -c contrast=32                  # range 0..64
+        # v4l2-ctl -d "$dev" -c saturation=64                # range 0..128
+        # v4l2-ctl -d "$dev" -c hue=0                        # range -40..40
+        # v4l2-ctl -d "$dev" -c gamma=100                    # range 72..500
+        # v4l2-ctl -d "$dev" -c gain=0                       # range 0..100
+        # v4l2-ctl -d "$dev" -c sharpness=3                  # range 0..6
+        # v4l2-ctl -d "$dev" -c backlight_compensation=1     # range 0..2
+        # v4l2-ctl -d "$dev" -c power_line_frequency=0       # 0=Disabled,1=50Hz,2=60Hz
+
+        # White balance manual mode sequence:
+        # v4l2-ctl -d "$dev" -c white_balance_automatic=0
+        # v4l2-ctl -d "$dev" -c white_balance_temperature=4600  # range 2800..6500
+
+        # Exposure manual mode sequence:
+        # v4l2-ctl -d "$dev" -c auto_exposure=1
+        # v4l2-ctl -d "$dev" -c exposure_time_absolute=157      # range 1..5000
+        # v4l2-ctl -d "$dev" -c exposure_dynamic_framerate=0    # keep fixed fps behavior
+        # v4l2-ctl -d "$dev" -c auto_exposure=3                  # restore auto mode
     ) &
 done
 
